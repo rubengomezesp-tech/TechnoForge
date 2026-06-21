@@ -234,9 +234,14 @@ function refreshSong() {
 // ----------------------------------------------------------------------------
 function buildVoices() {
   const dest = Tone.getDestination();
-  const limiter = new Tone.Limiter(-1).connect(dest);
-  const comp = new Tone.Compressor(-14, 3).connect(limiter);
-  const master = new Tone.Gain(0.9).connect(comp);
+  // --- Cadena de mastering: EQ → glue comp → saturación suave → makeup → limitador ---
+  const limiter = new Tone.Limiter(-0.5).connect(dest);
+  const makeup = new Tone.Gain(1.4).connect(limiter);        // empuje de volumen
+  const sat = new Tone.Distortion({ distortion: 0.08, oversample: "2x" }).connect(makeup);
+  sat.wet.value = 0.12;                                       // calidez sutil
+  const glue = new Tone.Compressor({ threshold: -18, ratio: 2.5, attack: 0.02, release: 0.18 }).connect(sat);
+  const eq = new Tone.EQ3({ low: -1, mid: 0, high: 1.5 }).connect(glue); // limpia graves, da aire
+  const master = new Tone.Gain(0.85).connect(eq);
 
   const drumBus = new Tone.Gain(1).connect(master);
   const musicalBus = new Tone.Gain(1).connect(master); // recibe el "pump"

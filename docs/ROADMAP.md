@@ -34,12 +34,14 @@ masterizar con asistencia, y dejar el toque final al productor.
 - Más motores de síntesis (808/909, bass reese, plucks) y FX (downlifters, sweeps).
 - Estructura de arreglo configurable por el usuario.
 
-## 🎚️ Fase 2 — Mezcla y mastering (lo que más € ahorra)
+## 🎚️ Fase 2 — Mezcla y mastering (en marcha)
 
-- Mezcla automática: ganancias, paneo, EQ de limpieza, sidechain por envío.
-- **Mastering automático**: análisis de loudness (LUFS), EQ de tono, compresión
-  multibanda y limitador para dejar el track a nivel de club.
-- Exportar **stems** por instrumento (no solo la mezcla).
+- ✅ **Cadena de máster básica**: EQ (limpia graves / da aire) → glue compressor
+  → saturación suave → makeup gain → limitador. El track sale con pegada y
+  volumen competitivo.
+- 🔜 Análisis de **loudness real (LUFS)** y normalización automática a un objetivo.
+- 🔜 Mezcla automática por pista: ganancias/paneo, EQ de limpieza por instrumento.
+- 🔜 Exportar **stems** por instrumento (no solo la mezcla).
 
 ## 🤖 Fase 3 — IA de verdad y stems
 
