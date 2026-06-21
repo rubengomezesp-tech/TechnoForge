@@ -74,6 +74,7 @@ let projectName = "Mi track";
 let samples = {};             // sampler: { trackId: {name, url(dataURL)} } persistente
 let sampleBuffers = {};       // { trackId: Tone.ToneAudioBuffer } en memoria (decodificado)
 let sampleTarget = null;      // pista destino del próximo archivo cargado
+let editMode = "notes";       // "notes" | "prob" | "ratchet" — qué edita el clic en celda
 const SAMPLEABLE = ["kick", "clap", "chat", "ohat"]; // pistas de batería (one-shots)
 
 const $ = (id) => document.getElementById(id);
@@ -81,9 +82,19 @@ const rnd = Math.random;
 const arr16 = (v) => Array.from({ length: STEPS }, () => v);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
+// Claves de nota que se aplanan al montar el track (no incluir 'mods' aquí)
+const NOTE_KEYS = ["kick", "clap", "chat", "ohat", "bass", "stab"];
+
+// mods: modificadores por paso y pista — { p: probabilidad 0..1, r: ratchet 1..4 }
+function blankMods() {
+  const m = {};
+  for (const k of NOTE_KEYS) m[k] = arr16(null);
+  return m;
+}
+
 function blankPattern() {
   return { kick: arr16(false), clap: arr16(false), chat: arr16(false),
-           ohat: arr16(false), bass: arr16(null), stab: arr16(null) };
+           ohat: arr16(false), bass: arr16(null), stab: arr16(null), mods: blankMods() };
 }
 
 patterns = [blankPattern()]; // ya con arr16 inicializado
@@ -185,7 +196,7 @@ function getProject() {
     ui: {
       bpm: $("bpm").value, root: $("root").value, scale: $("scale").value,
       style: $("style").value, emotion: $("emotion").value,
-      energy: $("energy").value, swing: $("swing").value,
+      energy: $("energy").value, swing: $("swing").value, humanize: $("humanize").value,
     },
     patterns,
     current,
@@ -204,6 +215,11 @@ function normalizePattern(src) {
     if (Array.isArray(src[k])) for (let i = 0; i < STEPS; i++) p[k][i] = !!src[k][i];
   if (Array.isArray(src.bass)) for (let i = 0; i < STEPS; i++) p.bass[i] = src.bass[i] == null ? null : src.bass[i];
   if (Array.isArray(src.stab)) for (let i = 0; i < STEPS; i++) p.stab[i] = Array.isArray(src.stab[i]) ? src.stab[i].slice() : null;
+  if (src.mods) for (const k of NOTE_KEYS)
+    if (Array.isArray(src.mods[k])) for (let i = 0; i < STEPS; i++) {
+      const m = src.mods[k][i];
+      p.mods[k][i] = m ? { p: m.p != null ? m.p : 1, r: m.r != null ? m.r : 1 } : null;
+    }
   return p;
 }
 
@@ -214,7 +230,7 @@ function loadProject(p) {
     const el = $(id); if (el == null || v == null) return;
     el.value = v; const out = $(id + "Out"); if (out) out.textContent = v;
   };
-  ["bpm", "root", "scale", "style", "emotion", "energy", "swing"].forEach((id) => set(id, p.ui[id]));
+  ["bpm", "root", "scale", "style", "emotion", "energy", "swing", "humanize"].forEach((id) => set(id, p.ui[id]));
   if (Array.isArray(p.patterns) && p.patterns.length) {
     patterns = p.patterns.map(normalizePattern);
   } else {
@@ -385,6 +401,7 @@ function styleId() { return $("style").value; }
 function bpm()     { return parseInt($("bpm").value, 10); }
 function energy()  { return parseInt($("energy").value, 10) / 100; }
 function swingAmt(){ return parseInt($("swing").value, 10) / 100; }
+function humanizeAmt(){ const el = $("humanize"); return el ? parseInt(el.value, 10) / 100 : 0; }
 
 function emotionId()     { return $("emotion").value; }
 function currentEmotion(){ return EMOTIONS[emotionId()] || EMOTIONS.melancolia; }
@@ -501,8 +518,11 @@ function regenTrack(id) {
 
 // Copia y mutación del patrón (para variar los drops)
 function deepCopy(p) {
+  const mods = blankMods();
+  if (p.mods) for (const k of NOTE_KEYS)
+    if (p.mods[k]) for (let i = 0; i < STEPS; i++) mods[k][i] = p.mods[k][i] ? { ...p.mods[k][i] } : null;
   return { kick: [...p.kick], clap: [...p.clap], chat: [...p.chat], ohat: [...p.ohat],
-           bass: [...p.bass], stab: p.stab.map((c) => (c ? [...c] : null)) };
+           bass: [...p.bass], stab: p.stab.map((c) => (c ? [...c] : null)), mods };
 }
 
 function mutate(p) {
@@ -538,16 +558,21 @@ function mutate(p) {
 // Monta el track encadenando TUS tramos en orden (cada uno dura barsPerTramo).
 function buildSong() {
   const song = { kick: [], clap: [], chat: [], ohat: [], bass: [], stab: [] };
+  const songMods = {}; for (const k of NOTE_KEYS) songMods[k] = [];
   const sections = [];
   let barCursor = 0;
 
   patterns.forEach((pat, i) => {
     for (let b = 0; b < barsPerTramo; b++)
       for (let s = 0; s < STEPS; s++)
-        for (const k of Object.keys(song)) song[k].push(pat[k][s]);
+        for (const k of NOTE_KEYS) {
+          song[k].push(pat[k][s]);
+          songMods[k].push(pat.mods && pat.mods[k] ? pat.mods[k][s] : null);
+        }
     sections.push({ name: "Tramo " + (i + 1), startBar: barCursor, bars: barsPerTramo });
     barCursor += barsPerTramo;
   });
+  song.mods = songMods;
   return { song, sections, fx: [] };
 }
 
@@ -731,16 +756,26 @@ function buildVoices(opts = {}) {
 // El "pump" (sidechain) se dispara siempre con el bombo, aunque el bombo esté
 // excluido, para que el stem de bajo/acordes conserve su respiración.
 function triggerStep(v, p, s, time, inc = () => true) {
-  if (p.kick[s] && inc("kick")) v.kick(time);
+  const stepDur = (60 / bpm()) / 4;
+  const jAmt = humanizeAmt();                       // 0..1
+  const jit = () => jAmt ? (rnd() - 0.5) * jAmt * 0.02 : 0; // ±10ms máx
+  // Aplica probabilidad (saltar) y ratchet (multi-disparo) del paso a una voz
+  const play = (id, fn) => {
+    const m = p.mods && p.mods[id] ? p.mods[id][s] : null;
+    if (m && m.p != null && m.p < 1 && rnd() > m.p) return; // probabilidad
+    const r = m && m.r > 1 ? m.r : 1;
+    if (r === 1) { fn(time + jit()); return; }
+    const sub = stepDur / r;
+    for (let i = 0; i < r; i++) fn(time + i * sub + jit());  // ratchet
+  };
+
+  if (p.kick[s] && inc("kick")) play("kick", (t) => v.kick(t));
   if (p.kick[s]) v.sidechain(time);
-  if (p.clap[s] && inc("clap")) v.clap(time);
-  if (p.chat[s] && inc("chat")) {
-    const vel = (s % 4 === 0 ? 0.95 : 0.6) + rnd() * 0.1; // humanización
-    v.chat(time, clamp(vel, 0, 1));
-  }
-  if (p.ohat[s] && inc("ohat")) v.ohat(time);
-  if (p.bass[s] != null && inc("bass")) v.bass(time, p.bass[s]);
-  if (p.stab[s] != null && inc("stab")) v.stab(time, p.stab[s]);
+  if (p.clap[s] && inc("clap")) play("clap", (t) => v.clap(t));
+  if (p.chat[s] && inc("chat")) play("chat", (t) => v.chat(t, clamp((s % 4 === 0 ? 0.95 : 0.6) + rnd() * 0.1, 0, 1)));
+  if (p.ohat[s] && inc("ohat")) play("ohat", (t) => v.ohat(t));
+  if (p.bass[s] != null && inc("bass")) play("bass", (t) => v.bass(t, p.bass[s]));
+  if (p.stab[s] != null && inc("stab")) play("stab", (t) => v.stab(t, p.stab[s]));
 }
 
 // ----------------------------------------------------------------------------
@@ -816,8 +851,13 @@ function toggleMode() {
 // ----------------------------------------------------------------------------
 function repeatPattern(p, n) {
   const out = { kick: [], clap: [], chat: [], ohat: [], bass: [], stab: [] };
+  const outMods = {}; for (const k of NOTE_KEYS) outMods[k] = [];
   for (let i = 0; i < n; i++)
-    for (const k of Object.keys(out)) out[k] = out[k].concat(p[k]);
+    for (const k of NOTE_KEYS) {
+      out[k] = out[k].concat(p[k]);
+      outMods[k] = outMods[k].concat(p.mods && p.mods[k] ? p.mods[k] : arr16(null));
+    }
+  out.mods = outMods;
   return out;
 }
 
@@ -962,9 +1002,18 @@ function renderGrid() {
     for (let s = 0; s < STEPS; s++) {
       const cell = document.createElement("div");
       const on = t.type === "drum" ? pattern[t.id][s] : pattern[t.id][s] != null;
+      const mod = on && pattern.mods[t.id] ? pattern.mods[t.id][s] : null;
       cell.className = "step" + (s % 4 === 0 ? " beat" : "") + (on ? " on" : "")
                        + (on && t.type === "pitch" ? " note" : "");
       cell.dataset.track = t.id; cell.dataset.step = s;
+      // Indicadores de probabilidad (opacidad + %) y ratchet (nº de golpes)
+      if (mod && mod.p != null && mod.p < 1) {
+        cell.style.opacity = (0.4 + mod.p * 0.6).toFixed(2);
+        const b = document.createElement("span"); b.className = "cell-prob"; b.textContent = Math.round(mod.p * 100); cell.appendChild(b);
+      }
+      if (mod && mod.r > 1) {
+        const b = document.createElement("span"); b.className = "cell-ratchet"; b.textContent = "×" + mod.r; cell.appendChild(b);
+      }
       cell.onclick = () => toggleCell(t, s);
       steps.appendChild(cell);
     }
@@ -1126,14 +1175,41 @@ function renderInstruments() {
   el.appendChild(instrumentPanel("stab", "Acordes"));
 }
 
+function stepIsOn(t, s) {
+  return t.type === "drum" ? pattern[t.id][s] : pattern[t.id][s] != null;
+}
+
 function toggleCell(t, s) {
-  if (t.type === "drum") pattern[t.id][s] = !pattern[t.id][s];
-  else if (t.id === "bass") pattern.bass[s] = pattern.bass[s] == null ? bassNoteAt(s) : null;
-  else pattern.stab[s] = pattern.stab[s] == null ? chordAt(progAt(s), 48, wantSeventh()) : null;
+  if (editMode === "prob" || editMode === "ratchet") {
+    if (!stepIsOn(t, s)) return; // los modificadores solo aplican a pasos activos
+    const cur = pattern.mods[t.id][s] || { p: 1, r: 1 };
+    if (editMode === "prob") {
+      const next = { 1: 0.75, 0.75: 0.5, 0.5: 0.25, 0.25: 1 };
+      cur.p = next[cur.p] != null ? next[cur.p] : 0.75;
+    } else {
+      cur.r = cur.r >= 4 ? 1 : cur.r + 1;
+    }
+    pattern.mods[t.id][s] = (cur.p === 1 && cur.r === 1) ? null : cur;
+  } else {
+    if (t.type === "drum") pattern[t.id][s] = !pattern[t.id][s];
+    else if (t.id === "bass") pattern.bass[s] = pattern.bass[s] == null ? bassNoteAt(s) : null;
+    else pattern.stab[s] = pattern.stab[s] == null ? chordAt(progAt(s), 48, wantSeventh()) : null;
+    if (!stepIsOn(t, s)) pattern.mods[t.id][s] = null; // al apagar, limpia su mod
+  }
+  syncTramo();
   built = null;
   refreshSong();
   renderGrid();
   markDirty();
+}
+
+function setEditMode(m) {
+  editMode = m;
+  document.querySelectorAll("#editmode .seg").forEach((el) => el.classList.toggle("active", el.dataset.mode === m));
+  renderGrid();
+  setStatus(m === "notes" ? "Modo <b>Notas</b>: toca celdas para activar/desactivar."
+    : m === "prob" ? "Modo <b>Probabilidad</b>: toca un paso activo para variar su % (100→75→50→25)."
+    : "Modo <b>Ratchet</b>: toca un paso activo para multiplicar el golpe (x1→x2→x3→x4).");
 }
 
 function renderTimeline() {
@@ -1210,7 +1286,10 @@ function init() {
       markDirty();
     };
   };
-  ["bpm", "energy", "swing"].forEach(bindRange);
+  ["bpm", "energy", "swing", "humanize"].forEach(bindRange);
+
+  // Modo de edición de celdas: Notas / Prob / Ratchet
+  document.querySelectorAll("#editmode .seg").forEach((b) => { b.onclick = () => setEditMode(b.dataset.mode); });
 
   // Rumble (FX global): un solo control
   $("rumble").oninput = () => { $("rumbleOut").textContent = $("rumble").value; applyRumble(parseInt($("rumble").value, 10) / 100); };

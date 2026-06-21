@@ -63,8 +63,12 @@ masterizar con asistencia, y dejar el toque final al productor.
 - ✅ **Sinte editable** (Bajo/Acordes): onda + filtro (cutoff/reso) + ADSR, en vivo.
 - ✅ **Rack de FX por canal**: saturación (WaveShaper), **sidechain real** al kick,
   y envíos a **reverb espacial** (Freeverb) + **delay ping-pong** compartidos.
+- ✅ **Techno Rumble** (un control): sub del kick (paso-bajo → reverb larga).
+- ✅ **Secuenciador avanzado**: probabilidad por paso, ratcheting (×2/×3/×4) y
+  humanización (jitter), con modos de edición Notas/Prob/Ratchet e indicadores.
+- ✅ **UI nivel estudio** (sistema de diseño) + zonas plegables + sonido pro de fábrica.
 - 🔜 Duración por tramo configurable + reordenar arrastrando.
-- 🔜 EQ/compresor por canal; Techno Rumble; secuenciador probabilístico; LFO/MIDI.
+- 🔜 EQ/compresor por canal; síntesis 303 acid / FM stabs; LFO matrix; Web MIDI.
 
 ## 🎚️ Fase 2 — Mezcla y mastering (en marcha)
 

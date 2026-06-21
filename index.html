@@ -93,12 +93,22 @@
       <input id="rumble" type="range" min="0" max="100" value="0" title="Sub-bajo del techno oscuro (desde el kick)" />
       <output id="rumbleOut">0</output>
     </label>
+    <label>Humanizar
+      <input id="humanize" type="range" min="0" max="100" value="0" title="Micro-desfases aleatorios: imperfección humana" />
+      <output id="humanizeOut">0</output>
+    </label>
   </section>
 
   <section id="timeline" class="timeline"><!-- estructura del track (modo Track) --></section>
 
   <h2 class="zone-title">Secuenciador</h2>
   <section id="tramos" class="tramos"><!-- chips de tramos por JS --></section>
+  <div id="editmode" class="editmode">
+    <span class="em-label">Editar</span>
+    <button type="button" class="seg active" data-mode="notes">Notas</button>
+    <button type="button" class="seg" data-mode="prob">Prob</button>
+    <button type="button" class="seg" data-mode="ratchet">Ratchet</button>
+  </div>
   <main id="grid" class="grid"><!-- las pistas se dibujan por JS --></main>
 
   <h2 class="zone-title" data-collapsible data-open="false">Instrumentos</h2>

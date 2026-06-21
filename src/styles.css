@@ -234,6 +234,12 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px 
 .tramos .tramo-add.fresh { border-color: color-mix(in srgb, var(--accent-2) 60%, var(--line)); color: var(--accent-2); }
 .tramos .tramo-add.fresh:hover { border-color: var(--accent-2); }
 
+/* ----------------------------------------------------- Modo de edición ----- */
+.editmode { display: flex; align-items: center; gap: var(--s-2); padding: var(--s-2) var(--s-5) 0; flex-wrap: wrap; }
+.editmode .em-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); font-weight: 600; margin-right: 2px; }
+.editmode .seg { padding: 6px 12px; font-size: 12px; background: var(--surface-3); }
+.editmode .seg.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 650; }
+
 /* ------------------------------------------------------------ Secuenciador - */
 .grid { padding: var(--s-4) var(--s-5); display: flex; flex-direction: column; gap: var(--s-2); }
 .track {
@@ -256,11 +262,19 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px 
 /* Agrupación visual por tiempos (cada 4 pasos) */
 .step:nth-child(4n+1):not(:first-child) { margin-left: 6px; }
 .step {
+  position: relative;
   aspect-ratio: 1 / 1; min-width: 0;
   background: var(--surface-3); border: 1px solid var(--line); border-radius: 5px;
   cursor: pointer;
   transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease), transform 60ms var(--ease), box-shadow var(--t-fast) var(--ease);
 }
+/* Indicadores de paso: probabilidad (%) y ratchet (×n) */
+.step .cell-prob, .step .cell-ratchet {
+  position: absolute; font-size: 9px; font-weight: 700; line-height: 1;
+  color: #fff; pointer-events: none; font-variant-numeric: tabular-nums;
+}
+.step .cell-prob { left: 3px; bottom: 2px; opacity: .85; }
+.step .cell-ratchet { right: 3px; top: 2px; }
 .step.beat { background: color-mix(in srgb, var(--surface-3) 70%, var(--surface-4)); }
 .step:hover { border-color: var(--ink-2); }
 .step:active { transform: scale(.94); }
