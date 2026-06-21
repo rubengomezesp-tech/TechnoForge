@@ -72,6 +72,7 @@ let tramoVocal = [true];      // si la vocal suena en cada tramo (clips por secc
 let mode = "loop";            // "loop" | "song"
 let built = null;             // { song, sections, fx } cuando hay track montado
 let currentStep = -1;
+let playbackStep = -1;        // último paso disparado por el secuenciador de audio
 let seq = null;
 let live = null;
 let mix = defaultMix();       // mezclador por pista: { vol(dB), pan(-1..1), mute, solo }
@@ -1504,11 +1505,15 @@ function buildVoices(opts = {}) {
     master = own(new Tone.Gain(0.85)).connect(autoFilter);
   }
 
-  // Returns globales de FX: reverb espacial + delay ping-pong (algorítmicos =
-  // válidos también en el render offline de export).
-  const reverb = own(new Tone.Freeverb({ roomSize: liveMode ? 0.78 : 0.9, dampening: 2500 }));
-  reverb.wet.value = 1; reverb.connect(master);
-  const delay = own(new Tone.PingPongDelay({ delayTime: "8n", feedback: liveMode ? 0.22 : 0.32, wet: 1 })).connect(master);
+  // Returns globales de FX. En vivo usamos previos baratos para evitar cuelgues
+  // de Chrome; el render offline conserva reverb/delay completos.
+  const reverb = liveMode
+    ? own(new Tone.Gain(0.22)).connect(master)
+    : own(new Tone.Freeverb({ roomSize: 0.9, dampening: 2500 })).connect(master);
+  if (!liveMode) reverb.wet.value = 1;
+  const delay = liveMode
+    ? own(new Tone.Gain(0.12)).connect(master)
+    : own(new Tone.PingPongDelay({ delayTime: "8n", feedback: 0.32, wet: 1 })).connect(master);
 
   // Tira de canal por pista con RACK DE FX: canal(vol/pan/mute) → drive
   // (saturación WaveShaper) → scGain (sidechain) → máster, + envíos a reverb/delay.
@@ -1541,15 +1546,18 @@ function buildVoices(opts = {}) {
   }
   const masterMeter = own(new Tone.Meter());
   out.connect(masterMeter); // medir la SALIDA real (post-cadena de máster)
-  const analyser = own(new Tone.Analyser("fft", liveMode ? 32 : 64)); // analizador de espectro
-  out.connect(analyser);
+  const analyser = liveMode ? null : own(new Tone.Analyser("fft", 64)); // FFT solo en render/diagnóstico pesado
+  if (analyser) out.connect(analyser);
 
   // Techno Rumble: el kick alimenta un sub sostenido (paso-bajo → reverb larga)
   // = el retumbe grave del techno oscuro. Un solo control (fxGlobal.rumble).
   const rumbleSend = own(new Tone.Gain(fxGlobal.rumble || 0));
   const rumbleFilter = own(new Tone.Filter(120, "lowpass"));
-  const rumbleVerb = own(new Tone.Freeverb({ roomSize: liveMode ? 0.72 : 0.92, dampening: liveMode ? 1800 : 1200 })); rumbleVerb.wet.value = 1;
-  rumbleSend.connect(rumbleFilter); rumbleFilter.connect(rumbleVerb); rumbleVerb.connect(master);
+  const rumbleOut = liveMode
+    ? own(new Tone.Gain(0.45)).connect(master)
+    : own(new Tone.Freeverb({ roomSize: 0.92, dampening: 1200 })).connect(master);
+  if (!liveMode) rumbleOut.wet.value = 1;
+  rumbleSend.connect(rumbleFilter); rumbleFilter.connect(rumbleOut);
   fx.kick.scGain.connect(rumbleSend);
 
   // Pista de Vocal/Sample: loop sincronizado (playbackRate ajusta a N compases)
@@ -1606,8 +1614,10 @@ function buildVoices(opts = {}) {
 
   // Acordes: sinte editable (synth.stab) + reverb. Motor Saw o FM (stabs metálicos)
   const st = synth.stab;
-  const stabVerb = own(new Tone.Freeverb({ roomSize: liveMode ? 0.42 : 0.62, dampening: 3000 })).connect(ch.stab);
-  stabVerb.wet.value = liveMode ? 0.18 : 0.28;
+  const stabVerb = liveMode
+    ? own(new Tone.Gain(1)).connect(ch.stab)
+    : own(new Tone.Freeverb({ roomSize: 0.62, dampening: 3000 })).connect(ch.stab);
+  if (!liveMode) stabVerb.wet.value = 0.28;
   const stabFilter = own(new Tone.Filter(st.cutoff, "lowpass")).connect(stabVerb);
   stabFilter.Q.value = st.res;
   let stab;
@@ -1749,14 +1759,11 @@ function buildSequence() {
 
   seq = new Tone.Sequence((time, g) => {
     const src = (mode === "song") ? (built ? built.song : pattern) : pattern;
+    playbackStep = g;
     if (g < src.kick.length) triggerStep(live, src, g, time);
     if (fxMap[g] === "riser") live.riser(time, barSec);
     if (fxMap[g] === "downlifter") live.downlifter(time, barSec);
     if (fxMap[g] === "impact") live.impact(time);
-    Tone.Draw.schedule(() => {
-      if (!seq || Tone.Transport.state !== "started") return;
-      highlight(g % STEPS); flashHits(g % STEPS); highlightSection(g); updatePosition(g);
-    }, time);
   }, [...Array(len).keys()], "16n").start(0);
 }
 
@@ -1770,6 +1777,7 @@ async function play() {
   Tone.Transport.swingSubdivision = "16n";
   if (!live) live = buildVoices();
   buildSequence();
+  playbackStep = 0;
   if (live.vocalPlayer && !live._vocalSynced) { live.vocalPlayer.sync().start(0); live._vocalSynced = true; }
   Tone.Transport.start();
   $("playBtn").classList.add("playing");
@@ -1780,6 +1788,7 @@ async function play() {
 function stop() {
   Tone.Transport.stop();
   if (seq) { seq.dispose(); seq = null; }
+  playbackStep = -1;
   $("playBtn").classList.remove("playing");
   $("playBtn").textContent = "▶ Play";
   highlight(-1);
@@ -2148,7 +2157,7 @@ function setMeterBar(elId, db) {
 let lastSpectrumDraw = 0;
 function drawSpectrum(now = 0) {
   requestAnimationFrame(drawSpectrum);
-  if (now - lastSpectrumDraw < 100) return; // 10 fps: suficiente visualmente y más amable con Web Audio
+  if (now - lastSpectrumDraw < 300) return; // visual auxiliar, no debe competir con audio
   lastSpectrumDraw = now;
   const cv = document.getElementById("spectrum"); if (!cv) return;
   const ctx = cv.getContext("2d"); const W = cv.width, H = cv.height;
@@ -2169,12 +2178,24 @@ function drawSpectrum(now = 0) {
 let lastMeterDraw = 0;
 function meterLoop(now = 0) {
   requestAnimationFrame(meterLoop);
-  if (now - lastMeterDraw < 90) return; // ~11 fps evita presión constante en main thread
+  if (now - lastMeterDraw < 250) return; // medidores a 4 fps: estable en sesiones largas
   lastMeterDraw = now;
   if (!live || !live.meters) return;
   const playing = window.Tone && Tone.Transport && Tone.Transport.state === "started";
   for (const t of TRACKS) setMeterBar("meter-" + t.id, playing ? live.meters[t.id].getValue() : -Infinity);
   setMeterBar("meter-master", playing && live.masterMeter ? live.masterMeter.getValue() : -Infinity);
+}
+
+let lastLiveUiDraw = 0;
+function liveUiLoop(now = 0) {
+  requestAnimationFrame(liveUiLoop);
+  if (!window.Tone || !Tone.Transport || Tone.Transport.state !== "started" || playbackStep < 0) return;
+  if (now - lastLiveUiDraw < 180) return;
+  lastLiveUiDraw = now;
+  const g = playbackStep;
+  highlight(g % STEPS);
+  highlightSection(g);
+  updatePosition(g);
 }
 
 // --- Sintetizadores editables (zona Instrumentos): onda + filtro + ADSR ---
@@ -2377,12 +2398,11 @@ function highlightSection(g) {
     // Vocal por tramo: suena solo en los tramos con vocal activa
     if (live && live.vocalChannel) live.vocalChannel.mute = vocal.mute || !tramoVocalOf(idx);
   }
-  // Playhead recorriendo TODA la canción (en px, respetando el padding)
+  // Playhead recorriendo toda la canción sin forzar medidas de layout.
   const tl = $("timeline"), ph = document.getElementById("tl-playhead");
   if (ph && tl) {
-    const cs = getComputedStyle(tl), padL = parseFloat(cs.paddingLeft);
-    const w = tl.clientWidth - padL - parseFloat(cs.paddingRight);
-    ph.style.left = (padL + (g / built.song.kick.length) * w) + "px";
+    const total = Math.max(1, built.song.kick.length - 1);
+    ph.style.left = (clamp(g / total, 0, 1) * 100).toFixed(2) + "%";
   }
 }
 
@@ -2391,19 +2411,6 @@ function highlight(s) {
   document.querySelectorAll(".step.playhead").forEach((el) => el.classList.remove("playhead"));
   if (s >= 0) document.querySelectorAll(`.step[data-step="${s}"]`).forEach((el) => el.classList.add("playhead"));
   currentStep = s;
-}
-
-// Flash de los hits activos al sonar (en el tiempo de audio, vía Tone.Draw).
-const REDUCED_MOTION = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-let lastHitFlashAt = 0;
-function flashHits(col) {
-  const now = performance.now();
-  if (now - lastHitFlashAt < 120) return;
-  lastHitFlashAt = now;
-  document.querySelectorAll(`.step.on[data-step="${col}"]`).forEach((el) => {
-    if (REDUCED_MOTION) el.animate([{ opacity: 0.65 }, { opacity: 1 }], { duration: 120, easing: "ease-out" });
-    else el.animate([{ transform: "scale(1.08)" }, { transform: "scale(1)" }], { duration: 120, easing: "ease-out" });
-  });
 }
 
 function updatePosition(g) {
@@ -2493,6 +2500,7 @@ function init() {
 
   meterLoop(); // medidores del mezclador (se mueven al reproducir)
   drawSpectrum(); // analizador de espectro
+  liveUiLoop(); // contador/playhead desacoplados del callback musical
   renderProDesk();
   renderAutomation();
   renderInstruments();
