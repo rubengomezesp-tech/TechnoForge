@@ -1265,7 +1265,7 @@ function buildSequence() {
     if (fxMap[g] === "riser") live.riser(time, barSec);
     if (fxMap[g] === "downlifter") live.downlifter(time, barSec);
     if (fxMap[g] === "impact") live.impact(time);
-    Tone.Draw.schedule(() => { highlight(g % STEPS); flashHits(g % STEPS); highlightSection(g); }, time);
+    Tone.Draw.schedule(() => { highlight(g % STEPS); flashHits(g % STEPS); highlightSection(g); updatePosition(g); }, time);
   }, [...Array(len).keys()], "16n").start(0);
 }
 
@@ -1293,6 +1293,7 @@ function stop() {
   $("playBtn").textContent = "▶ Play";
   highlight(-1);
   document.querySelectorAll("#tramos .tramo.playing").forEach((el) => el.classList.remove("playing"));
+  const pos = $("position"); if (pos) pos.textContent = "1:1:1";
   setStatus("Parado. Pulsa <b>Play</b> para seguir.");
 }
 
@@ -1513,6 +1514,28 @@ function renderGrid() {
 // --- Mezclador (zona propia, con channel strips estilo estudio) ---
 function fmtDb(v) { return (v > 0 ? "+" : "") + v + " dB"; }
 
+// Knob giratorio reutilizable (look de estudio pro). Arrastra vertical para girar;
+// doble clic = valor por defecto. Misma lógica que un slider, con cara de "aparato".
+function knob(value, min, max, step, onChange, opts) {
+  opts = opts || {};
+  const wrap = document.createElement("div"); wrap.className = "knob"; if (opts.title) wrap.title = opts.title;
+  const dial = document.createElement("div"); dial.className = "knob-dial"; dial.tabIndex = 0;
+  const ind = document.createElement("div"); ind.className = "knob-ind"; dial.appendChild(ind);
+  const lab = document.createElement("div"); lab.className = "knob-lab"; lab.textContent = opts.label || "";
+  let v = value;
+  const render = () => { ind.style.transform = `translateX(-50%) rotate(${-135 + ((v - min) / (max - min)) * 270}deg)`; };
+  const setV = (nv) => { v = Math.max(min, Math.min(max, Math.round(nv / step) * step)); render(); onChange(v); };
+  render();
+  let startY = 0, startV = 0, dragging = false;
+  dial.addEventListener("pointerdown", (e) => { e.preventDefault(); dragging = true; startY = e.clientY; startV = v; dial.setPointerCapture(e.pointerId); });
+  dial.addEventListener("pointermove", (e) => { if (dragging) setV(startV + ((startY - e.clientY) / 130) * (max - min)); });
+  dial.addEventListener("pointerup", (e) => { dragging = false; try { dial.releasePointerCapture(e.pointerId); } catch (_) {} });
+  dial.addEventListener("dblclick", () => { if (opts.def != null) setV(opts.def); });
+  dial.addEventListener("wheel", (e) => { e.preventDefault(); setV(v + (e.deltaY < 0 ? step : -step)); }, { passive: false });
+  wrap.append(dial, lab);
+  return wrap;
+}
+
 function channelStrip(id, name, m, solo) {
   const strip = document.createElement("div");
   strip.className = "strip";
@@ -1541,27 +1564,21 @@ function channelStrip(id, name, m, solo) {
   const mu = document.createElement("button"); mu.className = "mini" + ((m.mute || (solo && !m.solo)) ? " muted" : ""); mu.textContent = "M"; mu.title = "Silenciar"; mu.onclick = () => toggleMute(id);
   btns.append(s, mu);
 
-  // EQ de 3 bandas por canal + Rack de FX (drive/sidechain/envíos)
+  // EQ de 3 bandas por canal + Rack de FX, con KNOBS giratorios (look pro)
   const rack = document.createElement("div"); rack.className = "strip-fx";
-  const fxRow = (key, label, title, mn = 0, mx = 1, st = 0.05) => {
-    const row = document.createElement("label"); row.className = "fx-ctl";
-    const sp = document.createElement("span"); sp.textContent = label; sp.title = title;
-    const inp = document.createElement("input");
-    inp.type = "range"; inp.min = mn; inp.max = mx; inp.step = st; inp.value = m[key]; inp.title = title;
-    inp.oninput = () => { m[key] = parseFloat(inp.value); applyFx(id); };
-    row.append(sp, inp); return row;
-  };
+  const fxKnob = (key, label, title, mn = 0, mx = 1, st = 0.05, def = 0) =>
+    knob(m[key], mn, mx, st, (v) => { m[key] = v; applyFx(id); }, { label, title, def });
   rack.append(
-    fxRow("low", "LO", "EQ graves (dB)", -12, 12, 1),
-    fxRow("mid", "MID", "EQ medios (dB)", -12, 12, 1),
-    fxRow("high", "HI", "EQ agudos (dB)", -12, 12, 1),
-    fxRow("comp", "CMP", "Compresor (pegada)"),
-    fxRow("drive", "DRV", "Saturación / distorsión"),
-    fxRow("crush", "CRU", "Bitcrusher (lo-fi)"),
-    fxRow("width", "WID", "Anchura estéreo (0=mono, 0.5=normal, 1=ancho)", 0, 1, 0.05),
-    fxRow("sidechain", "SC", "Sidechain: baja con el kick"),
-    fxRow("rev", "REV", "Envío a reverb espacial"),
-    fxRow("delay", "DLY", "Envío a delay ping-pong"),
+    fxKnob("low", "LO", "EQ graves (dB)", -12, 12, 1, 0),
+    fxKnob("mid", "MID", "EQ medios (dB)", -12, 12, 1, 0),
+    fxKnob("high", "HI", "EQ agudos (dB)", -12, 12, 1, 0),
+    fxKnob("comp", "CMP", "Compresor (pegada)", 0, 1, 0.05, 0),
+    fxKnob("drive", "DRV", "Saturación / distorsión", 0, 1, 0.05, 0),
+    fxKnob("crush", "CRU", "Bitcrusher (lo-fi)", 0, 1, 0.05, 0),
+    fxKnob("width", "WID", "Anchura estéreo", 0, 1, 0.05, 0.5),
+    fxKnob("sidechain", "SC", "Sidechain: baja con el kick", 0, 1, 0.05, 0),
+    fxKnob("rev", "REV", "Envío a reverb espacial", 0, 1, 0.05, 0),
+    fxKnob("delay", "DLY", "Envío a delay ping-pong", 0, 1, 0.05, 0),
   );
 
   strip.append(nm, body, dbOut, pan, panLbl, btns, rack);
@@ -1688,13 +1705,9 @@ function instrumentPanel(id, label) {
     sel.onchange = () => onpick(sel.value);
     ctl.append(sp, sel); panel.appendChild(ctl);
   };
+  const knobs = document.createElement("div"); knobs.className = "instr-knobs";
   const mkSlider = (key, labelTxt, mn, mx, st) => {
-    const ctl = document.createElement("label"); ctl.className = "instr-ctl";
-    const sp = document.createElement("span"); sp.textContent = labelTxt;
-    const inp = document.createElement("input");
-    inp.type = "range"; inp.min = mn; inp.max = mx; inp.step = st; inp.value = p[key];
-    inp.oninput = () => { p[key] = parseFloat(inp.value); applySynth(id); };
-    ctl.append(sp, inp); panel.appendChild(ctl);
+    knobs.appendChild(knob(p[key], mn, mx, st, (v) => { p[key] = v; applySynth(id); }, { label: labelTxt }));
   };
 
   // Motor del stab: Saw o FM (cambia el tipo de voz → reconstruye al reproducir)
@@ -1718,6 +1731,7 @@ function instrumentPanel(id, label) {
   if (id === "bass") mkSlider("slide", "Slide", 0, 0.15, 0.005);          // glide acid 303
   if (id === "stab" && p.engine === "fm") mkSlider("fm", "FM", 0, 20, 0.5); // brillo FM
 
+  panel.appendChild(knobs);
   return panel;
 }
 
@@ -1832,6 +1846,11 @@ function flashHits(col) {
     if (REDUCED_MOTION) el.animate([{ opacity: 0.55 }, { opacity: 1 }], { duration: 160, easing: "ease-out" });
     else el.animate([{ transform: "scale(1.16)", filter: "brightness(1.9)" }, { transform: "scale(1)", filter: "brightness(1)" }], { duration: 170, easing: "ease-out" });
   });
+}
+
+function updatePosition(g) {
+  const el = $("position"); if (!el) return;
+  el.textContent = `${Math.floor(g / STEPS) + 1}:${Math.floor((g % STEPS) / 4) + 1}:${(g % 4) + 1}`;
 }
 
 function setStatus(html) { $("status").innerHTML = html; }

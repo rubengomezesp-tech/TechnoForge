@@ -128,6 +128,7 @@ button.primary.playing {
 .brand .tag { color: var(--muted); font-size: 12px; }
 .transport { display: flex; gap: var(--s-2); flex-wrap: wrap; }
 .spectrum { width: 200px; height: 34px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface-1); }
+.position { font-family: var(--mono); font-size: 15px; font-weight: 700; color: var(--accent-2); font-variant-numeric: tabular-nums; letter-spacing: .5px; min-width: 58px; text-align: center; }
 
 /* ------------------------------------------------------------- Proyecto --- */
 .projectbar {
@@ -372,11 +373,29 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px 
 }
 .strip-master .strip-db { color: var(--ink); font-weight: 700; }
 
-/* Rack de FX dentro del strip — 2 columnas compactas (denso pero limpio) */
-.strip-fx { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px; width: 100%; margin-top: 6px; padding-top: 8px; border-top: 1px solid var(--line); }
-.fx-ctl { display: grid; grid-template-columns: 26px 1fr; align-items: center; gap: 4px; }
-.fx-ctl span { font-size: 8.5px; letter-spacing: .02em; color: var(--muted); }
-.fx-ctl input[type="range"] { width: 100%; }
+/* Rack de FX dentro del strip — grid de KNOBS giratorios */
+.strip-fx { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px 4px; width: 100%; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); justify-items: center; }
+
+/* Knob giratorio (look de estudio pro) */
+.knob { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.knob-dial {
+  position: relative; width: 26px; height: 26px; border-radius: 50%;
+  background: radial-gradient(circle at 50% 38%, var(--surface-4), var(--surface-3) 70%, #0d0f14);
+  border: 1px solid var(--line-2); box-shadow: inset 0 1px 2px rgba(0,0,0,.5), 0 1px 1px rgba(0,0,0,.4);
+  cursor: ns-resize; touch-action: none;
+}
+.knob-dial:hover { border-color: var(--accent); }
+.knob-dial:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.knob-ind {
+  position: absolute; left: 50%; top: 3px; width: 2px; height: 9px; border-radius: 1px;
+  background: var(--accent); transform-origin: 50% 10px; transform: translateX(-50%);
+}
+.knob-lab { font-size: 8.5px; letter-spacing: .02em; color: var(--muted); text-transform: uppercase; }
+
+/* Knobs en los paneles de Instrumentos */
+.instr-knobs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px 8px; margin-top: 10px; justify-items: center; }
+.instr-knobs .knob-dial { width: 34px; height: 34px; }
+.instr-knobs .knob-ind { height: 11px; transform-origin: 50% 14px; top: 4px; }
 
 /* ---------------------------------------------------------------- Estado --- */
 .statusbar {
