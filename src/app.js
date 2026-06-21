@@ -110,7 +110,7 @@ function syncTramo() { patterns[current] = pattern; }
 function defaultMix() {
   const m = {};
   for (const t of TRACKS) {
-    const c = { vol: 0, pan: 0, mute: false, solo: false, low: 0, mid: 0, high: 0, drive: 0, sidechain: 0, rev: 0, delay: 0 };
+    const c = { vol: 0, pan: 0, mute: false, solo: false, low: 0, mid: 0, high: 0, comp: 0, drive: 0, crush: 0, sidechain: 0, rev: 0, delay: 0 };
     // Sonido techno "de fábrica": bombeo en bajo/acordes, pegada en kick, aire en stab
     if (t.id === "bass" || t.id === "stab") c.sidechain = 0.35;
     if (t.id === "stab") c.rev = 0.22;
@@ -119,7 +119,7 @@ function defaultMix() {
   }
   return m;
 }
-function mixOf(id) { return mix[id] || { vol: 0, pan: 0, mute: false, solo: false, low: 0, mid: 0, high: 0, drive: 0, sidechain: 0, rev: 0, delay: 0 }; }
+function mixOf(id) { return mix[id] || { vol: 0, pan: 0, mute: false, solo: false, low: 0, mid: 0, high: 0, comp: 0, drive: 0, crush: 0, sidechain: 0, rev: 0, delay: 0 }; }
 
 // Curva de saturación (soft-clip) para el WaveShaper del drive por canal.
 // amount 0 = identidad (sin distorsión); sube = más saturación analógica.
@@ -132,11 +132,17 @@ function makeDriveCurve(amount) {
   return curve;
 }
 
+// Mapeos de los nuevos FX: compresión (umbral) y bitcrusher (bits)
+function compThreshold(amount) { return -(amount || 0) * 30; }        // 0 = sin comp, 1 = -30 dB
+function crushBits(amount) { return Math.max(4, Math.round(16 - (amount || 0) * 12)); } // 16 limpio → 4 roto
+
 // Aplica el rack de FX de un canal a las voces en vivo
 function applyFx(id) {
   if (live && live.fx && live.fx[id]) {
     const m = mixOf(id), f = live.fx[id];
     if (f.eq) { f.eq.low.value = m.low || 0; f.eq.mid.value = m.mid || 0; f.eq.high.value = m.high || 0; }
+    if (f.comp) f.comp.threshold.value = compThreshold(m.comp || 0);
+    if (f.crush) f.crush.bits.value = crushBits(m.crush || 0);
     f.drive.curve = makeDriveCurve(m.drive || 0);
     f.sendRev.gain.value = m.rev || 0;
     f.sendDly.gain.value = m.delay || 0;
@@ -205,6 +211,48 @@ async function normalizeLoudness() {
   lastLufs = target;       // tras ajustar, el loudness queda ≈ objetivo
   renderMixer();           // refresca lectura/slider del máster
   setStatus(`Normalizado: medido <b>${lufs.toFixed(1)} LUFS</b> → ${target} LUFS (ganancia ${fxGlobal.masterGain >= 0 ? "+" : ""}${fxGlobal.masterGain} dB).`);
+}
+
+// Presets de sonido de 1 clic: moldean controles + síntesis + mezcla + FX + rumble
+const GENRE_PRESETS = {
+  hard: {
+    bpm: 140, swing: 6, style: "industrial", emotion: "oscuridad", rumble: 0.5,
+    synth: { bass: { wave: "sawtooth", cutoff: 130, res: 4, slide: 0 }, stab: { engine: "saw", cutoff: 1800, res: 2 } },
+    fx: { kick: { drive: 0.35, comp: 0.45, low: 2 }, clap: { comp: 0.3 }, chat: { high: 3 }, ohat: { high: 3 }, bass: { sidechain: 0.6, drive: 0.3, low: -3, crush: 0.15 }, stab: { drive: 0.2, rev: 0.25 } },
+  },
+  melodic: {
+    bpm: 124, swing: 14, style: "melodic", emotion: "melancolia", rumble: 0.25,
+    synth: { bass: { wave: "fatsawtooth", cutoff: 90, res: 2, slide: 0.04 }, stab: { engine: "saw", cutoff: 3000, res: 1 } },
+    fx: { kick: { drive: 0.15 }, bass: { sidechain: 0.45, low: -2 }, stab: { rev: 0.45, delay: 0.2, high: 2 } },
+  },
+  hypnotic: {
+    bpm: 132, swing: 10, style: "hypnotic", emotion: "nostalgia", rumble: 0.35,
+    synth: { bass: { wave: "fatsawtooth", cutoff: 80, res: 3, slide: 0.06 }, stab: { engine: "saw", cutoff: 2200, res: 2 } },
+    fx: { bass: { sidechain: 0.5, drive: 0.2 }, stab: { rev: 0.35, delay: 0.3 }, chat: { high: 2 } },
+  },
+  industrial: {
+    bpm: 138, swing: 4, style: "industrial", emotion: "tension", rumble: 0.6,
+    synth: { bass: { wave: "sawtooth", cutoff: 140, res: 5, slide: 0 }, stab: { engine: "fm", fm: 12, cutoff: 2500, res: 2 } },
+    fx: { kick: { drive: 0.5, comp: 0.5 }, clap: { crush: 0.2 }, bass: { drive: 0.5, crush: 0.3, sidechain: 0.6 }, stab: { drive: 0.3, crush: 0.2, rev: 0.2 } },
+  },
+};
+
+function applyGenrePreset(name) {
+  const g = GENRE_PRESETS[name]; if (!g) return;
+  const setR = (id, v) => { const el = $(id); if (el) { el.value = v; const o = $(id + "Out"); if (o) o.textContent = v; } };
+  if (g.bpm) { setR("bpm", g.bpm); if (window.Tone) Tone.Transport.bpm.value = g.bpm; }
+  if (g.swing != null) setR("swing", g.swing);
+  if (g.style) $("style").value = g.style;
+  if (g.emotion) { $("emotion").value = g.emotion; $("scale").value = currentEmotion().scale; }
+  if (g.rumble != null) { fxGlobal.rumble = g.rumble; setR("rumble", Math.round(g.rumble * 100)); }
+  synth = defaultSynths();
+  if (g.synth) for (const k of ["bass", "stab"]) if (g.synth[k]) Object.assign(synth[k], g.synth[k]);
+  mix = defaultMix();
+  if (g.fx) for (const id of Object.keys(g.fx)) if (mix[id]) Object.assign(mix[id], g.fx[id]);
+  invalidateVoices();
+  renderInstruments(); renderMixer();
+  markDirty();
+  setStatus(`Preset <b>${name}</b> aplicado. Pulsa <b>🎲 Generar idea</b> para un patrón del estilo, o <b>Play</b>.`);
 }
 
 // Invalida las voces tras un cambio de grafo (motor FM, samples). Si está
@@ -689,17 +737,22 @@ function buildVoices(opts = {}) {
     const c = new Tone.Channel({ volume: m.vol, pan: m.pan });
     c.mute = opts.flatMix ? false : (m.mute || (solo && !m.solo));
     const eq = new Tone.EQ3({ low: m.low || 0, mid: m.mid || 0, high: m.high || 0 });
+    const comp = new Tone.Compressor({ threshold: compThreshold(m.comp || 0), ratio: 4, attack: 0.01, release: 0.12 });
     const drive = new Tone.WaveShaper(makeDriveCurve(m.drive || 0));
+    const crush = new Tone.BitCrusher(crushBits(m.crush || 0));
     const scGain = new Tone.Gain(1); // sidechain: baja por cada golpe de kick
-    c.connect(eq); eq.connect(drive); drive.connect(scGain); scGain.connect(master);
+    // cadena de canal pro: EQ → comp → saturación → bitcrush → sidechain → máster
+    c.connect(eq); eq.connect(comp); comp.connect(drive); drive.connect(crush); crush.connect(scGain); scGain.connect(master);
     const sendRev = new Tone.Gain(m.rev || 0);   scGain.connect(sendRev);   sendRev.connect(reverb);
     const sendDly = new Tone.Gain(m.delay || 0); scGain.connect(sendDly);   sendDly.connect(delay);
     meters[t.id] = new Tone.Meter(); scGain.connect(meters[t.id]);
     ch[t.id] = c;
-    fx[t.id] = { eq, drive, scGain, sendRev, sendDly };
+    fx[t.id] = { eq, comp, drive, crush, scGain, sendRev, sendDly };
   }
   const masterMeter = new Tone.Meter();
   out.connect(masterMeter); // medir la SALIDA real (post-cadena de máster)
+  const analyser = new Tone.Analyser("fft", 64); // analizador de espectro
+  out.connect(analyser);
 
   // Techno Rumble: el kick alimenta un sub sostenido (paso-bajo → reverb larga)
   // = el retumbe grave del techno oscuro. Un solo control (fxGlobal.rumble).
@@ -793,6 +846,7 @@ function buildVoices(opts = {}) {
     fx,          // rack de FX por canal (drive/sidechain/envíos)
     rumbleSend,  // envío al sub-rumble (techno)
     masterGainNode, // ganancia de máster (mastering/LUFS)
+    analyser,    // analizador de espectro (FFT) de la salida
     meters,      // medidores de nivel por pista
     masterMeter, // medidor de la salida (post-máster)
     bassSynth: bass, stabSynth: stab, stabFilter, // sintes (para ajuste en vivo)
@@ -1152,7 +1206,9 @@ function channelStrip(id, name, m, solo) {
     fxRow("low", "LO", "EQ graves (dB)", -12, 12, 1),
     fxRow("mid", "MID", "EQ medios (dB)", -12, 12, 1),
     fxRow("high", "HI", "EQ agudos (dB)", -12, 12, 1),
+    fxRow("comp", "CMP", "Compresor (pegada)"),
     fxRow("drive", "DRV", "Saturación / distorsión"),
+    fxRow("crush", "CRU", "Bitcrusher (lo-fi)"),
     fxRow("sidechain", "SC", "Sidechain: baja con el kick"),
     fxRow("rev", "REV", "Envío a reverb espacial"),
     fxRow("delay", "DLY", "Envío a delay ping-pong"),
@@ -1210,6 +1266,25 @@ function setMeterBar(elId, db) {
   if (!isFinite(v)) v = -60;
   el.style.height = Math.max(0, Math.min(1, (v + 60) / 60)) * 100 + "%";
 }
+// Analizador de espectro (FFT) — dibuja barras de frecuencia de la salida
+function drawSpectrum() {
+  requestAnimationFrame(drawSpectrum);
+  const cv = document.getElementById("spectrum"); if (!cv) return;
+  const ctx = cv.getContext("2d"); const W = cv.width, H = cv.height;
+  ctx.clearRect(0, 0, W, H);
+  const playing = window.Tone && Tone.Transport && Tone.Transport.state === "started";
+  if (!playing || !live || !live.analyser) return;
+  const data = live.analyser.getValue(); // dB, normalmente -100..0
+  const n = data.length, bw = W / n;
+  for (let i = 0; i < n; i++) {
+    const db = typeof data[i] === "number" ? data[i] : -100;
+    const h = Math.max(0, Math.min(1, (db + 90) / 90)) * H;
+    const hue = 350 - (i / n) * 200; // rojo (graves) → verde-azul (agudos)
+    ctx.fillStyle = `hsl(${hue} 80% 58%)`;
+    ctx.fillRect(i * bw, H - h, Math.max(1, bw - 1), h);
+  }
+}
+
 function meterLoop() {
   requestAnimationFrame(meterLoop);
   if (!live || !live.meters) return;
@@ -1418,6 +1493,9 @@ function init() {
   // Modo de edición de celdas: Notas / Prob / Ratchet
   document.querySelectorAll("#editmode .seg").forEach((b) => { b.onclick = () => setEditMode(b.dataset.mode); });
 
+  // Preset de sonido de 1 clic
+  $("preset").onchange = () => { if ($("preset").value) applyGenrePreset($("preset").value); };
+
   // Rumble (FX global): un solo control
   $("rumble").oninput = () => { $("rumbleOut").textContent = $("rumble").value; applyRumble(parseInt($("rumble").value, 10) / 100); };
 
@@ -1430,6 +1508,7 @@ function init() {
   });
 
   meterLoop(); // medidores del mezclador (se mueven al reproducir)
+  drawSpectrum(); // analizador de espectro
   renderInstruments();
 
   // Restaura el último proyecto (autoguardado) o genera uno nuevo

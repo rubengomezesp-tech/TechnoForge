@@ -67,8 +67,12 @@ masterizar con asistencia, y dejar el toque final al productor.
 - ✅ **Secuenciador avanzado**: probabilidad por paso, ratcheting (×2/×3/×4) y
   humanización (jitter), con modos de edición Notas/Prob/Ratchet e indicadores.
 - ✅ **UI nivel estudio** (sistema de diseño) + zonas plegables + sonido pro de fábrica.
-- 🔜 Duración por tramo configurable + reordenar arrastrando.
-- 🔜 EQ/compresor por canal; síntesis 303 acid / FM stabs; LFO matrix; Web MIDI.
+- ✅ EQ 3 bandas, **compresor** y **bitcrusher** por canal (cadena pro: EQ→comp→
+  saturación→crush→sidechain→envíos), rack en 2 columnas.
+- ✅ Síntesis **Acid 303** (slide) + **FM stabs**. **Mastering con LUFS**.
+- ✅ **Analizador de espectro** (FFT) en tiempo real. **Presets de sonido** de 1 clic
+  (Hard/Melodic/Hypnotic/Industrial) que moldean mezcla+síntesis+FX+rumble.
+- 🔜 LFO matrix; Web MIDI; duración por tramo; stereo width; más instrumentos.
 
 ## 🎚️ Fase 2 — Mezcla y mastering (en marcha)
 

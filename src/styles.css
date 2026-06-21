@@ -127,6 +127,7 @@ button.primary.playing {
 .brand h1 { font-size: 17px; margin: 0; letter-spacing: -.01em; font-weight: 700; }
 .brand .tag { color: var(--muted); font-size: 12px; }
 .transport { display: flex; gap: var(--s-2); flex-wrap: wrap; }
+.spectrum { width: 200px; height: 34px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface-1); }
 
 /* ------------------------------------------------------------- Proyecto --- */
 .projectbar {
@@ -305,7 +306,7 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px 
 .strip {
   display: flex; flex-direction: column; align-items: center; gap: 6px;
   background: var(--surface-1); border: 1px solid var(--line); border-radius: var(--r-lg);
-  padding: var(--s-3) var(--s-2); min-width: 84px;
+  padding: var(--s-3) var(--s-2); min-width: 120px;
 }
 .strip-master { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); background: color-mix(in srgb, var(--accent-soft) 50%, var(--surface-1)); }
 .strip-name { font-weight: 700; font-size: 12px; }
@@ -345,10 +346,10 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px 
 }
 .strip-master .strip-db { color: var(--ink); font-weight: 700; }
 
-/* Rack de FX dentro del strip */
-.strip-fx { display: grid; gap: 4px; width: 100%; margin-top: 6px; padding-top: 8px; border-top: 1px solid var(--line); }
-.fx-ctl { display: grid; grid-template-columns: 28px 1fr; align-items: center; gap: 5px; }
-.fx-ctl span { font-size: 9px; letter-spacing: .04em; color: var(--muted); }
+/* Rack de FX dentro del strip — 2 columnas compactas (denso pero limpio) */
+.strip-fx { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px; width: 100%; margin-top: 6px; padding-top: 8px; border-top: 1px solid var(--line); }
+.fx-ctl { display: grid; grid-template-columns: 26px 1fr; align-items: center; gap: 4px; }
+.fx-ctl span { font-size: 8.5px; letter-spacing: .02em; color: var(--muted); }
 .fx-ctl input[type="range"] { width: 100%; }
 
 /* ---------------------------------------------------------------- Estado --- */
