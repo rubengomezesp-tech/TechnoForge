@@ -338,6 +338,13 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px 
 .strip-btns .mini.muted { opacity: .42; }
 .strip-btns .mini.solo { background: var(--accent-2); border-color: var(--accent-2); color: #04221c; font-weight: 700; }
 
+/* Controles de mastering en el strip de máster */
+.strip .master-target {
+  background: var(--surface-3); color: var(--ink); border: 1px solid var(--line);
+  border-radius: var(--r-sm); padding: 3px 4px; font: inherit; font-size: 10px; max-width: 76px;
+}
+.strip-master .strip-db { color: var(--ink); font-weight: 700; }
+
 /* Rack de FX dentro del strip */
 .strip-fx { display: grid; gap: 4px; width: 100%; margin-top: 6px; padding-top: 8px; border-top: 1px solid var(--line); }
 .fx-ctl { display: grid; grid-template-columns: 28px 1fr; align-items: center; gap: 5px; }

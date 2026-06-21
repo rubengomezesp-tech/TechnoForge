@@ -68,7 +68,7 @@ let currentStep = -1;
 let seq = null;
 let live = null;
 let mix = defaultMix();       // mezclador por pista: { vol(dB), pan(-1..1), mute, solo }
-let fxGlobal = { rumble: 0 }; // FX globales (techno rumble)
+let fxGlobal = { rumble: 0, masterGain: 0, lufsTarget: -9 }; // FX globales + mastering
 let synth = defaultSynths();  // sintes editables (bajo y acordes): onda/filtro/ADSR
 let projectName = "Mi track";
 let samples = {};             // sampler: { trackId: {name, url(dataURL)} } persistente
@@ -149,6 +149,62 @@ function applyRumble(v) {
   fxGlobal.rumble = v;
   if (live && live.rumbleSend) live.rumbleSend.gain.value = v;
   markDirty();
+}
+
+// --- Mastering: ganancia de máster + medición de loudness (LUFS aprox.) ---
+function applyMasterGain() {
+  if (live && live.masterGainNode) live.masterGainNode.gain.value = 1.4 * Math.pow(10, (fxGlobal.masterGain || 0) / 20);
+  markDirty();
+}
+
+// Loudness integrada (gated) sobre un AudioBuffer ya masterizado. Fórmula
+// BS.1770 (mean-square) con gating absoluto; aprox. sin K-weighting completo.
+function measureLUFS(buf) {
+  const chs = buf.numberOfChannels, len = buf.length, rate = buf.sampleRate;
+  const data = []; for (let c = 0; c < chs; c++) data.push(buf.getChannelData(c));
+  const block = Math.max(1, Math.floor(rate * 0.4)), hop = Math.max(1, Math.floor(block / 4));
+  let sum = 0, n = 0;
+  for (let start = 0; start + block <= len; start += hop) {
+    let ms = 0;
+    for (let i = 0; i < block; i++) {
+      let s = 0; for (let c = 0; c < chs; c++) s += data[c][start + i];
+      s /= chs; ms += s * s;
+    }
+    ms /= block;
+    const lb = -0.691 + 10 * Math.log10(ms + 1e-12);
+    if (lb > -50) { sum += ms; n++; } // gating absoluto a -50 LUFS
+  }
+  if (!n) return -70;
+  return -0.691 + 10 * Math.log10(sum / n + 1e-12);
+}
+
+let lastLufs = null; // último loudness integrado medido (para la lectura del máster)
+function setLufsRead() { const el = $("lufs-read"); if (el) el.textContent = lastLufs != null ? lastLufs.toFixed(1) + " LUFS" : "– LUFS"; }
+
+async function measureLoudness() {
+  const songData = activeSong();
+  const p = songData ? songData.song : repeatPattern(pattern, 4);
+  const buffer = await renderOffline(p, songData ? songData.fx : null, () => true, {}); // con máster
+  return measureLUFS(buffer.get());
+}
+
+async function measureNow() {
+  setStatus("Midiendo loudness…");
+  lastLufs = await measureLoudness();
+  setLufsRead();
+  setStatus(`Loudness integrado: <b>${lastLufs.toFixed(1)} LUFS</b> (objetivo ${fxGlobal.lufsTarget}).`);
+}
+
+async function normalizeLoudness() {
+  setStatus("Midiendo loudness y normalizando…");
+  const lufs = await measureLoudness();
+  const target = fxGlobal.lufsTarget;
+  fxGlobal.masterGain = clamp(Math.round((fxGlobal.masterGain + (target - lufs)) * 10) / 10, -24, 24);
+  invalidateVoices();      // reconstruye con la ganancia nueva si está sonando
+  applyMasterGain();
+  lastLufs = target;       // tras ajustar, el loudness queda ≈ objetivo
+  renderMixer();           // refresca lectura/slider del máster
+  setStatus(`Normalizado: medido <b>${lufs.toFixed(1)} LUFS</b> → ${target} LUFS (ganancia ${fxGlobal.masterGain >= 0 ? "+" : ""}${fxGlobal.masterGain} dB).`);
 }
 
 // Invalida las voces tras un cambio de grafo (motor FM, samples). Si está
@@ -251,7 +307,8 @@ function loadProject(p) {
   pattern = patterns[current];
   barsPerTramo = p.barsPerTramo || 4;
   mix = normalizeMix(p.mix);
-  fxGlobal = { rumble: (p.fxGlobal && p.fxGlobal.rumble) || 0 };
+  const g = p.fxGlobal || {};
+  fxGlobal = { rumble: g.rumble || 0, masterGain: g.masterGain || 0, lufsTarget: g.lufsTarget || -9 };
   if ($("rumble")) { $("rumble").value = Math.round(fxGlobal.rumble * 100); $("rumbleOut").textContent = $("rumble").value; }
   synth = normalizeSynths(p.synth);
   // Sampler: re-decodifica los samples guardados en buffers de audio
@@ -312,7 +369,7 @@ function newProject() {
   mix = defaultMix();
   samples = {}; sampleBuffers = {};
   patterns = [blankPattern()]; current = 0; pattern = patterns[0];
-  fxGlobal = { rumble: 0 };
+  fxGlobal = { rumble: 0, masterGain: 0, lufsTarget: -9 };
   if ($("rumble")) { $("rumble").value = 0; $("rumbleOut").textContent = "0"; }
   synth = defaultSynths(); renderInstruments();
   if ($("projName")) $("projName").value = projectName;
@@ -599,13 +656,14 @@ function buildVoices(opts = {}) {
   const dest = Tone.getDestination();
   // Para exportar STEMS queremos el sonido "en crudo" (sin la cadena de máster),
   // para que sumen bien y los mezcles/masterices en tu DAW. bypassMaster lo omite.
-  let master;
+  let master, out, masterGainNode = null;
   if (opts.bypassMaster) {
-    master = new Tone.Gain(0.85).connect(dest);
+    master = new Tone.Gain(0.85).connect(dest); out = master;
   } else {
-    // --- Cadena de mastering: EQ → glue comp → saturación suave → makeup → limitador ---
-    const limiter = new Tone.Limiter(-0.5).connect(dest);
-    const makeup = new Tone.Gain(1.4).connect(limiter);        // empuje de volumen
+    // --- Cadena de mastering: EQ → glue comp → saturación → makeup(ganancia) → limitador ---
+    const limiter = new Tone.Limiter(-0.5).connect(dest); out = limiter;
+    const makeupGain = 1.4 * Math.pow(10, (fxGlobal.masterGain || 0) / 20); // ganancia de máster ajustable
+    const makeup = new Tone.Gain(makeupGain).connect(limiter); masterGainNode = makeup;
     const sat = new Tone.Distortion({ distortion: 0.08, oversample: "2x" }).connect(makeup);
     sat.wet.value = 0.12;                                       // calidez sutil
     const glue = new Tone.Compressor({ threshold: -18, ratio: 2.5, attack: 0.02, release: 0.18 }).connect(sat);
@@ -641,7 +699,7 @@ function buildVoices(opts = {}) {
     fx[t.id] = { eq, drive, scGain, sendRev, sendDly };
   }
   const masterMeter = new Tone.Meter();
-  master.connect(masterMeter);
+  out.connect(masterMeter); // medir la SALIDA real (post-cadena de máster)
 
   // Techno Rumble: el kick alimenta un sub sostenido (paso-bajo → reverb larga)
   // = el retumbe grave del techno oscuro. Un solo control (fxGlobal.rumble).
@@ -734,8 +792,9 @@ function buildVoices(opts = {}) {
     ch,          // tiras de canal del mezclador (para ajustes en vivo)
     fx,          // rack de FX por canal (drive/sidechain/envíos)
     rumbleSend,  // envío al sub-rumble (techno)
+    masterGainNode, // ganancia de máster (mastering/LUFS)
     meters,      // medidores de nivel por pista
-    masterMeter, // medidor del máster
+    masterMeter, // medidor de la salida (post-máster)
     bassSynth: bass, stabSynth: stab, stabFilter, // sintes (para ajuste en vivo)
     kick: (t) => players.kick ? players.kick.start(t) : kick.triggerAttackRelease("C1", "8n", t),
     clap: (t) => {
@@ -1108,7 +1167,7 @@ function renderMixer() {
   mx.innerHTML = "";
   const solo = anySolo();
   for (const t of TRACKS) mx.appendChild(channelStrip(t.id, t.name, mixOf(t.id), solo));
-  // Strip de máster (solo medidor por ahora)
+  // Strip de máster: medidor de salida + lectura LUFS + ganancia + normalizar
   const master = document.createElement("div");
   master.className = "strip strip-master";
   const nm = document.createElement("div"); nm.className = "strip-name"; nm.textContent = "MÁSTER";
@@ -1116,8 +1175,31 @@ function renderMixer() {
   const meter = document.createElement("div"); meter.className = "meter meter-wide";
   const fill = document.createElement("div"); fill.className = "meter-fill"; fill.id = "meter-master";
   meter.appendChild(fill); body.appendChild(meter);
-  const sub = document.createElement("div"); sub.className = "strip-lbl"; sub.textContent = "salida";
-  master.append(nm, body, sub);
+
+  const lufs = document.createElement("div"); lufs.className = "strip-db"; lufs.id = "lufs-read";
+  lufs.textContent = lastLufs != null ? lastLufs.toFixed(1) + " LUFS" : "– LUFS";
+
+  const gain = document.createElement("input");
+  gain.type = "range"; gain.className = "strip-pan"; gain.min = "-24"; gain.max = "24"; gain.step = "0.5";
+  gain.value = fxGlobal.masterGain; gain.title = "Ganancia de máster (dB)";
+  gain.oninput = () => { fxGlobal.masterGain = parseFloat(gain.value); applyMasterGain(); };
+  const gainLbl = document.createElement("div"); gainLbl.className = "strip-lbl"; gainLbl.textContent = "GAIN";
+
+  const tgt = document.createElement("select"); tgt.className = "master-target";
+  [["-7", "-7 club fuerte"], ["-9", "-9 club"], ["-14", "-14 streaming"]].forEach(([v, t]) => {
+    const o = document.createElement("option"); o.value = v; o.textContent = t; if (+v === fxGlobal.lufsTarget) o.selected = true; tgt.appendChild(o);
+  });
+  tgt.title = "Objetivo de loudness";
+  tgt.onchange = () => { fxGlobal.lufsTarget = parseInt(tgt.value, 10); markDirty(); };
+
+  const btns = document.createElement("div"); btns.className = "strip-btns";
+  const meas = document.createElement("button"); meas.className = "mini"; meas.textContent = "Medir";
+  meas.title = "Mide el loudness integrado (LUFS) sin cambiar nada"; meas.onclick = () => measureNow();
+  const norm = document.createElement("button"); norm.className = "mini"; norm.textContent = "Normaliz.";
+  norm.title = "Mide el loudness y ajusta la ganancia al objetivo"; norm.onclick = () => normalizeLoudness();
+  btns.append(meas, norm);
+
+  master.append(nm, body, lufs, gain, gainLbl, tgt, btns);
   mx.appendChild(master);
 }
 
