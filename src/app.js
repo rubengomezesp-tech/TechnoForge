@@ -164,6 +164,33 @@ function applyRumble(v) {
   markDirty();
 }
 
+// --- Web MIDI: tocar el bajo con un teclado y la rueda de modulación al LFO ---
+let midiOn = false;
+async function enableMIDI() {
+  if (!navigator.requestMIDIAccess) { setStatus("Tu navegador no soporta Web MIDI (usa Chrome)."); return; }
+  try {
+    await Tone.start();
+    if (!live) live = buildVoices();
+    const midi = await navigator.requestMIDIAccess();
+    const names = [];
+    midi.inputs.forEach((inp) => { inp.onmidimessage = handleMIDI; names.push(inp.name); });
+    midi.onstatechange = () => { midi.inputs.forEach((inp) => { inp.onmidimessage = handleMIDI; }); };
+    midiOn = true;
+    const btn = $("midiCtrl"); if (btn) { btn.classList.add("solo"); btn.textContent = "🎹 MIDI ✓"; }
+    setStatus(names.length ? `MIDI conectado: <b>${names.join(", ")}</b>. Toca el teclado (suena el bajo).` : "MIDI activo, esperando un dispositivo…");
+  } catch (e) { setStatus("No se pudo acceder a MIDI."); }
+}
+function handleMIDI(msg) {
+  const [status, d1, d2] = msg.data;
+  const cmd = status & 0xf0;
+  if (!live) return;
+  if (cmd === 0x90 && d2 > 0) {                 // note on → toca el bajo
+    if (live.bassSynth) live.bassSynth.triggerAttackRelease(Tone.Frequency(d1, "midi").toFrequency(), "8n");
+  } else if (cmd === 0xb0 && d1 === 1) {        // CC1 (rueda mod) → profundidad del LFO
+    fxGlobal.lfo.on = true; fxGlobal.lfo.depth = d2 / 127; lfoSettings(live.masterLfo); renderModulation();
+  }
+}
+
 // LFO del auto-filtro de máster: aplica fxGlobal.lfo a un LFO de Tone
 function lfoSettings(lfo) {
   if (!lfo) return;
@@ -1021,6 +1048,16 @@ function buildVoices(opts = {}) {
       envelope: { attack: st.attack, decay: st.decay, sustain: st.sustain, release: st.release },
       modulationEnvelope: { attack: 0.005, decay: 0.18, sustain: 0.2, release: 0.2 },
     }).connect(stabFilter);
+  } else if (st.engine === "pad") {
+    stab = new Tone.PolySynth(Tone.Synth, {
+      oscillator: { type: "fatsawtooth", count: 3, spread: 25 }, volume: -16,
+      envelope: { attack: 0.4, decay: 0.4, sustain: 0.7, release: 1.2 }, // pad sostenido
+    }).connect(stabFilter);
+  } else if (st.engine === "pluck") {
+    stab = new Tone.PolySynth(Tone.Synth, {
+      oscillator: { type: "triangle" }, volume: -12,
+      envelope: { attack: 0.002, decay: 0.16, sustain: 0, release: 0.1 }, // plucky
+    }).connect(stabFilter);
   } else {
     stab = new Tone.PolySynth(Tone.Synth, {
       oscillator: { type: st.wave === "fatsawtooth" ? "fatsawtooth" : st.wave }, volume: -14,
@@ -1572,13 +1609,14 @@ function instrumentPanel(id, label) {
 
   // Motor del stab: Saw o FM (cambia el tipo de voz → reconstruye al reproducir)
   if (id === "stab") {
-    mkSelect("Motor", [["saw", "Saw"], ["fm", "FM"]], p.engine, (v) => {
+    mkSelect("Motor", [["saw", "Saw"], ["fm", "FM"], ["pad", "Pad"], ["pluck", "Pluck"]], p.engine, (v) => {
       p.engine = v; renderInstruments(); invalidateVoices();
-      setStatus(v === "fm" ? "Acordes en <b>FM</b> (metálico/industrial)." : "Acordes en <b>Saw</b>.");
+      const n = { saw: "Saw", fm: "FM (metálico)", pad: "Pad (sostenido)", pluck: "Pluck" };
+      setStatus(`Acordes en <b>${n[v]}</b>.`);
     });
   }
-  // Onda (se oculta en FM: el timbre lo da el índice de modulación)
-  if (!(id === "stab" && p.engine === "fm")) {
+  // Onda: solo donde aplica (en acordes solo el motor Saw la usa)
+  if (!(id === "stab" && p.engine !== "saw")) {
     mkSelect("Onda", Object.keys(WAVE_LABELS).map((w) => [w, WAVE_LABELS[w]]), p.wave, (v) => { p.wave = v; applySynth(id); });
   }
 
@@ -1694,6 +1732,7 @@ function init() {
   $("saveBtn").onclick = saveProjectFile;
   $("newBtn").onclick = newProject;
   $("loadBtn").onclick = () => $("loadInput").click();
+  $("midiCtrl").onclick = enableMIDI;
   $("loadInput").onchange = (e) => { if (e.target.files[0]) loadProjectFile(e.target.files[0]); e.target.value = ""; };
   $("sampleInput").onchange = (e) => { if (e.target.files[0] && sampleTarget) loadSampleFile(e.target.files[0], sampleTarget); e.target.value = ""; };
   $("vocalInput").onchange = (e) => { if (e.target.files[0]) loadVocalFile(e.target.files[0]); e.target.value = ""; };
