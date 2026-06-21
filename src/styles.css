@@ -234,6 +234,8 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px 
 .tramos .tramo-add:hover { border-color: var(--accent); color: var(--ink); border-style: solid; }
 .tramos .tramo-add.fresh { border-color: color-mix(in srgb, var(--accent-2) 60%, var(--line)); color: var(--accent-2); }
 .tramos .tramo-add.fresh:hover { border-color: var(--accent-2); }
+.tramos .tramo-len { display: flex; align-items: center; gap: 6px; margin-left: auto; font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.tramos .tramo-len select { background: var(--surface-3); color: var(--ink); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 4px 6px; font: inherit; font-size: 12px; }
 
 /* ----------------------------------------------------- Modo de edición ----- */
 .editmode { display: flex; align-items: center; gap: var(--s-2); padding: var(--s-2) var(--s-5) 0; flex-wrap: wrap; }

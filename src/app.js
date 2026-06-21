@@ -61,7 +61,8 @@ const ARRANGEMENT = [
 let pattern;                  // el bucle del tramo activo === patterns[current]
 let patterns = [];            // lista de tramos (secciones); cada uno es un patrón
 let current = 0;              // índice del tramo que se edita
-let barsPerTramo = 4;         // cuántos compases dura cada tramo en modo Track
+let barsPerTramo = 4;         // duración por defecto de un tramo nuevo (compases)
+let tramoBars = [4];          // duración (compases) de cada tramo, en paralelo a patterns
 let mode = "loop";            // "loop" | "song"
 let built = null;             // { song, sections, fx } cuando hay track montado
 let currentStep = -1;
@@ -102,6 +103,7 @@ function blankPattern() {
 patterns = [blankPattern()]; // ya con arr16 inicializado
 current = 0;
 pattern = patterns[0];
+tramoBars = [4];
 
 // Mantiene pattern === patterns[current] tras reasignar pattern
 function syncTramo() { patterns[current] = pattern; }
@@ -318,6 +320,7 @@ function getProject() {
     patterns,
     current,
     barsPerTramo,
+    tramoBars,
     mix,
     fxGlobal,
     synth,
@@ -357,6 +360,7 @@ function loadProject(p) {
   current = Math.max(0, Math.min(p.current || 0, patterns.length - 1));
   pattern = patterns[current];
   barsPerTramo = p.barsPerTramo || 4;
+  tramoBars = patterns.map((_, i) => (p.tramoBars && p.tramoBars[i]) || barsPerTramo);
   mix = normalizeMix(p.mix);
   const g = p.fxGlobal || {};
   fxGlobal = { rumble: g.rumble || 0, masterGain: g.masterGain || 0, lufsTarget: g.lufsTarget || -9 };
@@ -428,7 +432,7 @@ function newProject() {
   projectName = "Mi track";
   mix = defaultMix();
   samples = {}; sampleBuffers = {};
-  patterns = [blankPattern()]; current = 0; pattern = patterns[0];
+  patterns = [blankPattern()]; current = 0; pattern = patterns[0]; tramoBars = [4];
   fxGlobal = { rumble: 0, masterGain: 0, lufsTarget: -9 };
   if ($("rumble")) { $("rumble").value = 0; $("rumbleOut").textContent = "0"; }
   synth = defaultSynths(); renderInstruments();
@@ -536,21 +540,29 @@ function selectTramo(i) {
   built = null; refreshSong(); renderGrid(); markDirty();
   setStatus(`Editando <b>Tramo ${i + 1}</b> de ${patterns.length}.`);
 }
+function tramoBarsOf(i) { return tramoBars[i] || barsPerTramo; }
+function setTramoBars(n) {
+  tramoBars[current] = n;
+  built = null; refreshSong(); renderTramos(); resync(); markDirty();
+  setStatus(`Tramo ${current + 1}: <b>${n}</b> compases.`);
+}
 function addTramo() { // copia el actual para seguir creando rápido una variación
   patterns.splice(current + 1, 0, deepCopy(pattern));
+  tramoBars.splice(current + 1, 0, tramoBarsOf(current));
   current += 1; pattern = patterns[current];
   built = null; refreshSong(); renderGrid(); resync(); markDirty();
   setStatus(`<b>Tramo ${current + 1}</b> creado (copia). Edítalo y pulsa ➕ para el siguiente.`);
 }
 function newIdeaTramo() { // tramo nuevo con una idea generada desde cero
   patterns.splice(current + 1, 0, blankPattern());
+  tramoBars.splice(current + 1, 0, barsPerTramo);
   current += 1; pattern = patterns[current];
   generate(); // genera la idea en el tramo nuevo (sincroniza y redibuja)
   setStatus(`<b>Tramo ${current + 1}</b> con idea nueva. Sigue creando.`);
 }
 function deleteTramo(i) {
   if (patterns.length <= 1) { setStatus("Necesitas al menos un tramo."); return; }
-  patterns.splice(i, 1);
+  patterns.splice(i, 1); tramoBars.splice(i, 1);
   current = Math.max(0, Math.min(current, patterns.length - 1));
   pattern = patterns[current];
   built = null; refreshSong(); renderGrid(); resync(); markDirty();
@@ -582,6 +594,14 @@ function renderTramos() {
   fresh.title = "Crea un tramo con una idea generada desde cero";
   fresh.onclick = newIdeaTramo;
   bar.appendChild(fresh);
+
+  // Duración (compases) del tramo activo
+  const barsWrap = document.createElement("label"); barsWrap.className = "tramo-len";
+  barsWrap.append(Object.assign(document.createElement("span"), { textContent: "Compases" }));
+  const sel = document.createElement("select"); sel.title = "Duración del tramo activo";
+  [1, 2, 4, 8, 16].forEach((n) => { const o = document.createElement("option"); o.value = n; o.textContent = n; if (n === tramoBarsOf(current)) o.selected = true; sel.appendChild(o); });
+  sel.onchange = () => setTramoBars(parseInt(sel.value, 10));
+  barsWrap.appendChild(sel); bar.appendChild(barsWrap);
 }
 
 function rootPc()  { return parseInt($("root").value, 10); }
@@ -752,14 +772,15 @@ function buildSong() {
   let barCursor = 0;
 
   patterns.forEach((pat, i) => {
-    for (let b = 0; b < barsPerTramo; b++)
+    const bars = tramoBarsOf(i);
+    for (let b = 0; b < bars; b++)
       for (let s = 0; s < STEPS; s++)
         for (const k of NOTE_KEYS) {
           song[k].push(pat[k][s]);
           songMods[k].push(pat.mods && pat.mods[k] ? pat.mods[k][s] : null);
         }
-    sections.push({ name: "Tramo " + (i + 1), startBar: barCursor, bars: barsPerTramo });
-    barCursor += barsPerTramo;
+    sections.push({ name: "Tramo " + (i + 1), startBar: barCursor, bars });
+    barCursor += bars;
   });
   song.mods = songMods;
   return { song, sections, fx: [] };
@@ -1063,8 +1084,9 @@ function toggleMode() {
   if (mode === "song") built = buildSong();
   $("modeBtn").textContent = mode === "song" ? "🎚️ Track" : "🔁 Bucle";
   renderTimeline();
+  const totalBars = tramoBars.reduce((a, b) => a + b, 0);
   setStatus(mode === "song"
-    ? `Modo <b>Track</b>: suenan tus ${patterns.length} tramo(s) en orden (${barsPerTramo} comp. c/u).`
+    ? `Modo <b>Track</b>: ${patterns.length} tramo(s), ${totalBars} compases en total.`
     : "Modo <b>Bucle</b>: se repite el tramo activo.");
   if (wasPlaying) play();
   markDirty();
