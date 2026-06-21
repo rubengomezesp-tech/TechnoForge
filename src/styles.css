@@ -286,6 +286,15 @@ button.primary.playing { background: var(--accent-2); border-color: var(--accent
 .strip-btns .mini.muted { opacity: .4; }
 .strip-btns .mini.solo { background: var(--accent-2); border-color: var(--accent-2); color: #04221c; font-weight: 700; }
 
+/* Rack de FX dentro del channel strip */
+.strip-fx {
+  display: grid; gap: 3px; width: 100%;
+  margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line);
+}
+.fx-ctl { display: grid; grid-template-columns: 28px 1fr; align-items: center; gap: 5px; }
+.fx-ctl span { font-size: 9px; letter-spacing: .5px; color: var(--muted); }
+.fx-ctl input[type="range"] { width: 100%; accent-color: var(--accent); }
+
 .steps { display: grid; grid-template-columns: repeat(16, 1fr); gap: 4px; }
 .step {
   aspect-ratio: 1 / 1;

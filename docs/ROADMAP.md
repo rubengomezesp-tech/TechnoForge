@@ -60,8 +60,11 @@ masterizar con asistencia, y dejar el toque final al productor.
   con chips y se encadenan en orden en modo Track. Montas el track parte a parte.
 - ✅ **Sampler**: carga audio real (.wav/.mp3) por pista de batería; reemplaza la
   síntesis (Tone.Player). El sample viaja en el `.tfp`.
+- ✅ **Sinte editable** (Bajo/Acordes): onda + filtro (cutoff/reso) + ADSR, en vivo.
+- ✅ **Rack de FX por canal**: saturación (WaveShaper), **sidechain real** al kick,
+  y envíos a **reverb espacial** (Freeverb) + **delay ping-pong** compartidos.
 - 🔜 Duración por tramo configurable + reordenar arrastrando.
-- 🔜 EQ/compresor por canal y envíos a FX (reverb/delay) compartidos.
+- 🔜 EQ/compresor por canal; Techno Rumble; secuenciador probabilístico; LFO/MIDI.
 
 ## 🎚️ Fase 2 — Mezcla y mastering (en marcha)
 

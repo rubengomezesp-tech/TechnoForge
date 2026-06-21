@@ -97,10 +97,33 @@ function syncTramo() { patterns[current] = pattern; }
 // ----------------------------------------------------------------------------
 function defaultMix() {
   const m = {};
-  for (const t of TRACKS) m[t.id] = { vol: 0, pan: 0, mute: false, solo: false };
+  for (const t of TRACKS) m[t.id] = { vol: 0, pan: 0, mute: false, solo: false, drive: 0, sidechain: 0, rev: 0, delay: 0 };
   return m;
 }
-function mixOf(id) { return mix[id] || { vol: 0, pan: 0, mute: false, solo: false }; }
+function mixOf(id) { return mix[id] || { vol: 0, pan: 0, mute: false, solo: false, drive: 0, sidechain: 0, rev: 0, delay: 0 }; }
+
+// Curva de saturación (soft-clip) para el WaveShaper del drive por canal.
+// amount 0 = identidad (sin distorsión); sube = más saturación analógica.
+function makeDriveCurve(amount) {
+  const n = 1024, curve = new Float32Array(n), k = (amount || 0) * 60;
+  for (let i = 0; i < n; i++) {
+    const x = (i / (n - 1)) * 2 - 1;
+    curve[i] = amount > 0 ? ((1 + k) * x) / (1 + k * Math.abs(x)) : x;
+  }
+  return curve;
+}
+
+// Aplica el rack de FX de un canal a las voces en vivo
+function applyFx(id) {
+  if (live && live.fx && live.fx[id]) {
+    const m = mixOf(id), f = live.fx[id];
+    f.drive.curve = makeDriveCurve(m.drive || 0);
+    f.sendRev.gain.value = m.rev || 0;
+    f.sendDly.gain.value = m.delay || 0;
+    // el sidechain se aplica en cada golpe de kick (en v.sidechain)
+  }
+  markDirty();
+}
 
 // Sintetizadores editables (subtractivo) para las pistas con tono
 function defaultSynths() {
@@ -535,22 +558,31 @@ function buildVoices(opts = {}) {
     master = new Tone.Gain(0.85).connect(eq);
   }
 
-  const drumBus = new Tone.Gain(1).connect(master);
-  const musicalBus = new Tone.Gain(1).connect(master); // recibe el "pump"
+  // Returns globales de FX: reverb espacial + delay ping-pong (algorítmicos =
+  // válidos también en el render offline de export).
+  const reverb = new Tone.Freeverb({ roomSize: 0.9, dampening: 2500 });
+  reverb.wet.value = 1; reverb.connect(master);
+  const delay = new Tone.PingPongDelay({ delayTime: "8n", feedback: 0.32, wet: 1 }).connect(master);
 
-  // Tira de canal por pista (mezclador): volumen/pan/mute/solo. En stems (flatMix)
-  // no se aplica mute/solo, para que cada pista aislada se renderice siempre.
+  // Tira de canal por pista con RACK DE FX: canal(vol/pan/mute) → drive
+  // (saturación WaveShaper) → scGain (sidechain) → máster, + envíos a reverb/delay.
+  // En stems (flatMix) no se aplica mute/solo.
   const solo = anySolo();
   const ch = {};
+  const fx = {};
   const meters = {};
   for (const t of TRACKS) {
     const m = mixOf(t.id);
     const c = new Tone.Channel({ volume: m.vol, pan: m.pan });
     c.mute = opts.flatMix ? false : (m.mute || (solo && !m.solo));
-    c.connect(t.type === "drum" ? drumBus : musicalBus);
-    meters[t.id] = new Tone.Meter();
-    c.connect(meters[t.id]);
+    const drive = new Tone.WaveShaper(makeDriveCurve(m.drive || 0));
+    const scGain = new Tone.Gain(1); // sidechain: baja por cada golpe de kick
+    c.connect(drive); drive.connect(scGain); scGain.connect(master);
+    const sendRev = new Tone.Gain(m.rev || 0);   scGain.connect(sendRev);   sendRev.connect(reverb);
+    const sendDly = new Tone.Gain(m.delay || 0); scGain.connect(sendDly);   sendDly.connect(delay);
+    meters[t.id] = new Tone.Meter(); scGain.connect(meters[t.id]);
     ch[t.id] = c;
+    fx[t.id] = { drive, scGain, sendRev, sendDly };
   }
   const masterMeter = new Tone.Meter();
   master.connect(masterMeter);
@@ -625,6 +657,7 @@ function buildVoices(opts = {}) {
 
   return {
     ch,          // tiras de canal del mezclador (para ajustes en vivo)
+    fx,          // rack de FX por canal (drive/sidechain/envíos)
     meters,      // medidores de nivel por pista
     masterMeter, // medidor del máster
     bassSynth: bass, stabSynth: stab, stabFilter, // sintes (para ajuste en vivo)
@@ -638,10 +671,17 @@ function buildVoices(opts = {}) {
     ohat: (t) => players.ohat ? players.ohat.start(t) : ohat.triggerAttackRelease("16n", t, 0.9),
     bass: (t, m) => bass.triggerAttackRelease(midi(m), "16n", t),
     stab: (t, arr) => stab.triggerAttackRelease(arr.map(midi), "8n", t),
-    pump: (t) => {
-      musicalBus.gain.cancelScheduledValues(t);
-      musicalBus.gain.setValueAtTime(0.25, t);
-      musicalBus.gain.linearRampToValueAtTime(1, t + 0.18);
+    // Sidechain: en cada kick, baja el volumen de los canales con SC>0 y lo
+    // recupera en ~0.18s (el "bombeo" clásico del techno).
+    sidechain: (t) => {
+      for (const tr of TRACKS) {
+        const amt = mixOf(tr.id).sidechain || 0;
+        if (amt <= 0) continue;
+        const g = fx[tr.id].scGain.gain;
+        g.cancelScheduledValues(t);
+        g.setValueAtTime(1 - amt, t);
+        g.linearRampToValueAtTime(1, t + 0.18);
+      }
     },
     riser: (t, dur) => {
       riserFilter.frequency.cancelScheduledValues(t);
@@ -664,7 +704,7 @@ function buildVoices(opts = {}) {
 // excluido, para que el stem de bajo/acordes conserve su respiración.
 function triggerStep(v, p, s, time, inc = () => true) {
   if (p.kick[s] && inc("kick")) v.kick(time);
-  if (p.kick[s]) v.pump(time);
+  if (p.kick[s]) v.sidechain(time);
   if (p.clap[s] && inc("clap")) v.clap(time);
   if (p.chat[s] && inc("chat")) {
     const vel = (s % 4 === 0 ? 0.95 : 0.6) + rnd() * 0.1; // humanización
@@ -938,7 +978,24 @@ function channelStrip(id, name, m, solo) {
   const mu = document.createElement("button"); mu.className = "mini" + ((m.mute || (solo && !m.solo)) ? " muted" : ""); mu.textContent = "M"; mu.title = "Silenciar"; mu.onclick = () => toggleMute(id);
   btns.append(s, mu);
 
-  strip.append(nm, body, dbOut, pan, panLbl, btns);
+  // Rack de FX por canal: Drive (saturación), SC (sidechain), Rev y Dly (envíos)
+  const rack = document.createElement("div"); rack.className = "strip-fx";
+  const fxRow = (key, label, title) => {
+    const row = document.createElement("label"); row.className = "fx-ctl";
+    const sp = document.createElement("span"); sp.textContent = label; sp.title = title;
+    const inp = document.createElement("input");
+    inp.type = "range"; inp.min = "0"; inp.max = "1"; inp.step = "0.05"; inp.value = m[key]; inp.title = title;
+    inp.oninput = () => { m[key] = parseFloat(inp.value); applyFx(id); };
+    row.append(sp, inp); return row;
+  };
+  rack.append(
+    fxRow("drive", "DRV", "Saturación / distorsión"),
+    fxRow("sidechain", "SC", "Sidechain: baja con el kick"),
+    fxRow("rev", "REV", "Envío a reverb espacial"),
+    fxRow("delay", "DLY", "Envío a delay ping-pong"),
+  );
+
+  strip.append(nm, body, dbOut, pan, panLbl, btns, rack);
   return strip;
 }
 
