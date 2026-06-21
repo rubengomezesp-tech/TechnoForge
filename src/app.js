@@ -31,13 +31,14 @@ const STYLE_PARAMS = {
   industrial: { hat: 0.70, stab: 1, bass: 0.72, seventh: false },
 };
 
-// Estructura del track (modo Track). keep = pistas activas en esa sección.
+// Estructura del track (modo Track). keep = pistas activas; variant = qué
+// versión del bucle usa (A = original, B = mutación, para que no sea idéntico).
 const ARRANGEMENT = [
   { name: "Intro",  bars: 4, keep: ["kick", "chat", "ohat"] },
   { name: "Build",  bars: 4, keep: ["kick", "chat", "ohat", "bass"], fillLast: true, riserLast: true },
-  { name: "Drop",   bars: 8, keep: "all", impactFirst: true },
-  { name: "Break",  bars: 4, keep: ["chat", "bass", "stab"], riserLast: true },
-  { name: "Drop 2", bars: 8, keep: "all", impactFirst: true },
+  { name: "Drop",   bars: 8, keep: "all", impactFirst: true, variant: "A" },
+  { name: "Break",  bars: 4, keep: ["chat", "bass", "stab"], riserLast: true, variant: "B" },
+  { name: "Drop 2", bars: 8, keep: "all", impactFirst: true, variant: "B" },
   { name: "Outro",  bars: 4, keep: ["kick", "chat"] },
 ];
 
@@ -148,6 +149,40 @@ function regenTrack(id) {
   renderGrid();
 }
 
+// Copia y mutación del patrón (para variar los drops)
+function deepCopy(p) {
+  return { kick: [...p.kick], clap: [...p.clap], chat: [...p.chat], ohat: [...p.ohat],
+           bass: [...p.bass], stab: p.stab.map((c) => (c ? [...c] : null)) };
+}
+
+function mutate(p) {
+  const m = deepCopy(p);
+  const sc = SCALES[scaleId()];
+  const root = bassRoot(), fifth = root + sc[4];
+  // Cambia algunas notas del bajo
+  for (let s = 0; s < STEPS; s++)
+    if (m.bass[s] != null && rnd() < 0.3) {
+      const r = rnd();
+      m.bass[s] = r > 0.6 ? root + 12 : r > 0.3 ? fifth : root;
+    }
+  // Re-rolea un par de closed hats
+  for (let i = 0; i < 3; i++) {
+    const s = Math.floor(rnd() * STEPS);
+    if (!m.ohat[s]) m.chat[s] = !m.chat[s];
+  }
+  // Mueve un stab de sitio
+  const idxs = [];
+  m.stab.forEach((c, s) => { if (c) idxs.push(s); });
+  if (idxs.length) {
+    const from = idxs[Math.floor(rnd() * idxs.length)];
+    const to = [3, 7, 10, 11, 14][Math.floor(rnd() * 5)];
+    if (m.stab[to] == null) { m.stab[to] = m.stab[from]; m.stab[from] = null; }
+  }
+  // Ghost de bombo
+  if (rnd() < 0.5) m.kick[14] = !m.kick[14];
+  return m;
+}
+
 // ----------------------------------------------------------------------------
 // Arreglo automático: convierte el bucle base en un track completo
 // ----------------------------------------------------------------------------
@@ -155,23 +190,25 @@ function buildSong() {
   const song = { kick: [], clap: [], chat: [], ohat: [], bass: [], stab: [] };
   const sections = [];
   const fx = [];
+  const variants = { A: pattern, B: mutate(pattern) };
   let barCursor = 0;
 
   for (const sec of ARRANGEMENT) {
     const keepAll = sec.keep === "all";
     const keep = (id) => keepAll || sec.keep.includes(id);
+    const src = variants[sec.variant || "A"];
     const startStep = barCursor * STEPS;
 
     for (let b = 0; b < sec.bars; b++) {
       const lastBar = b === sec.bars - 1;
       for (let s = 0; s < STEPS; s++) {
         const roll = sec.fillLast && lastBar; // fill de hats en el último compás
-        song.kick.push(keep("kick") ? pattern.kick[s] : false);
-        song.clap.push(keep("clap") ? pattern.clap[s] : false);
-        song.chat.push(roll ? true : (keep("chat") ? pattern.chat[s] : false));
-        song.ohat.push(keep("ohat") ? pattern.ohat[s] : false);
-        song.bass.push(keep("bass") ? pattern.bass[s] : null);
-        song.stab.push(keep("stab") ? pattern.stab[s] : null);
+        song.kick.push(keep("kick") ? src.kick[s] : false);
+        song.clap.push(keep("clap") ? src.clap[s] : false);
+        song.chat.push(roll ? true : (keep("chat") ? src.chat[s] : false));
+        song.ohat.push(keep("ohat") ? src.ohat[s] : false);
+        song.bass.push(keep("bass") ? src.bass[s] : null);
+        song.stab.push(keep("stab") ? src.stab[s] : null);
       }
     }
 
