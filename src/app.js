@@ -70,7 +70,7 @@ let currentStep = -1;
 let seq = null;
 let live = null;
 let mix = defaultMix();       // mezclador por pista: { vol(dB), pan(-1..1), mute, solo }
-let fxGlobal = { rumble: 0, masterGain: 0, lufsTarget: -9 }; // FX globales + mastering
+let fxGlobal = { rumble: 0, masterGain: 0, lufsTarget: -9, lfo: { on: false, bars: 2, depth: 0.5 } }; // FX globales + mastering + LFO
 let synth = defaultSynths();  // sintes editables (bajo y acordes): onda/filtro/ADSR
 let projectName = "Mi track";
 let samples = {};             // sampler: { trackId: {name, url(dataURL)} } persistente
@@ -116,7 +116,7 @@ function syncTramo() { patterns[current] = pattern; }
 function defaultMix() {
   const m = {};
   for (const t of TRACKS) {
-    const c = { vol: 0, pan: 0, mute: false, solo: false, low: 0, mid: 0, high: 0, comp: 0, drive: 0, crush: 0, sidechain: 0, rev: 0, delay: 0 };
+    const c = { vol: 0, pan: 0, mute: false, solo: false, low: 0, mid: 0, high: 0, comp: 0, drive: 0, crush: 0, width: 0.5, sidechain: 0, rev: 0, delay: 0 };
     // Sonido techno "de fábrica": bombeo en bajo/acordes, pegada en kick, aire en stab
     if (t.id === "bass" || t.id === "stab") c.sidechain = 0.35;
     if (t.id === "stab") c.rev = 0.22;
@@ -125,7 +125,7 @@ function defaultMix() {
   }
   return m;
 }
-function mixOf(id) { return mix[id] || { vol: 0, pan: 0, mute: false, solo: false, low: 0, mid: 0, high: 0, comp: 0, drive: 0, crush: 0, sidechain: 0, rev: 0, delay: 0 }; }
+function mixOf(id) { return mix[id] || { vol: 0, pan: 0, mute: false, solo: false, low: 0, mid: 0, high: 0, comp: 0, drive: 0, crush: 0, width: 0.5, sidechain: 0, rev: 0, delay: 0 }; }
 
 // Curva de saturación (soft-clip) para el WaveShaper del drive por canal.
 // amount 0 = identidad (sin distorsión); sube = más saturación analógica.
@@ -149,6 +149,7 @@ function applyFx(id) {
     if (f.eq) { f.eq.low.value = m.low || 0; f.eq.mid.value = m.mid || 0; f.eq.high.value = m.high || 0; }
     if (f.comp) f.comp.threshold.value = compThreshold(m.comp || 0);
     if (f.crush) f.crush.bits.value = crushBits(m.crush || 0);
+    if (f.widener) f.widener.width.value = m.width != null ? m.width : 0.5;
     f.drive.curve = makeDriveCurve(m.drive || 0);
     f.sendRev.gain.value = m.rev || 0;
     f.sendDly.gain.value = m.delay || 0;
@@ -160,6 +161,25 @@ function applyFx(id) {
 function applyRumble(v) {
   fxGlobal.rumble = v;
   if (live && live.rumbleSend) live.rumbleSend.gain.value = v;
+  markDirty();
+}
+
+// LFO del auto-filtro de máster: aplica fxGlobal.lfo a un LFO de Tone
+function lfoSettings(lfo) {
+  if (!lfo) return;
+  const l = fxGlobal.lfo || { on: false, bars: 2, depth: 0.5 };
+  if (l.on) {
+    const barSec = (60 / bpm()) * 4;
+    const depth = l.depth != null ? l.depth : 0.5;
+    lfo.min = 300 + (1 - depth) * 5000; // más profundidad = barre más grave
+    lfo.max = 15000;
+    lfo.frequency.value = 1 / ((l.bars || 2) * barSec);
+  } else {
+    lfo.min = 18000; lfo.max = 18000; // abierto, sin efecto
+  }
+}
+function applyLfo() {
+  if (live && live.masterLfo) lfoSettings(live.masterLfo);
   markDirty();
 }
 
@@ -192,6 +212,9 @@ function measureLUFS(buf) {
 
 let lastLufs = null; // último loudness integrado medido (para la lectura del máster)
 function setLufsRead() { const el = $("lufs-read"); if (el) el.textContent = lastLufs != null ? lastLufs.toFixed(1) + " LUFS" : "– LUFS"; }
+
+function showProgress(txt) { const p = $("progress"); if (p) { const t = $("progressTxt"); if (t) t.textContent = txt || "Renderizando…"; p.hidden = false; } }
+function hideProgress() { const p = $("progress"); if (p) p.hidden = true; }
 
 // Mide sobre un fragmento corto (el tramo activo ×4 compases) = rápido y
 // representativo: la ganancia de máster es global, así basta medir un trozo loud.
@@ -386,7 +409,8 @@ function loadProject(p) {
   tramoFx = patterns.map((_, i) => (p.tramoFx && p.tramoFx[i]) || "none");
   mix = normalizeMix(p.mix);
   const g = p.fxGlobal || {};
-  fxGlobal = { rumble: g.rumble || 0, masterGain: g.masterGain || 0, lufsTarget: g.lufsTarget || -9 };
+  fxGlobal = { rumble: g.rumble || 0, masterGain: g.masterGain || 0, lufsTarget: g.lufsTarget || -9,
+    lfo: g.lfo ? { on: !!g.lfo.on, bars: g.lfo.bars || 2, depth: g.lfo.depth != null ? g.lfo.depth : 0.5 } : { on: false, bars: 2, depth: 0.5 } };
   if ($("rumble")) { $("rumble").value = Math.round(fxGlobal.rumble * 100); $("rumbleOut").textContent = $("rumble").value; }
   synth = normalizeSynths(p.synth);
   // Sampler: re-decodifica los samples guardados en buffers de audio
@@ -414,7 +438,7 @@ function loadProject(p) {
   if ($("projName")) $("projName").value = projectName;
   built = null; live = null; // reconstruir voces con la mezcla nueva
   if (window.Tone && Tone.Transport) Tone.Transport.bpm.value = bpm();
-  refreshSong(); renderGrid(); renderTimeline(); renderInstruments(); renderVocal();
+  refreshSong(); renderGrid(); renderTimeline(); renderInstruments(); renderModulation(); renderVocal();
   return true;
 }
 
@@ -456,8 +480,9 @@ function newProject() {
   mix = defaultMix();
   samples = {}; sampleBuffers = {};
   patterns = [blankPattern()]; current = 0; pattern = patterns[0]; tramoBars = [4]; tramoFx = ["none"];
-  fxGlobal = { rumble: 0, masterGain: 0, lufsTarget: -9 };
+  fxGlobal = { rumble: 0, masterGain: 0, lufsTarget: -9, lfo: { on: false, bars: 2, depth: 0.5 } };
   if ($("rumble")) { $("rumble").value = 0; $("rumbleOut").textContent = "0"; }
+  renderModulation();
   synth = defaultSynths(); renderInstruments();
   vocal = { name: null, url: null, bars: 4, vol: 0, mute: false }; vocalBuffer = null; renderVocal();
   if ($("projName")) $("projName").value = projectName;
@@ -518,6 +543,29 @@ function clearVocal() {
   setStatus("Vocal quitada.");
 }
 function setVocal(key, v) { vocal[key] = v; invalidateVoices(); renderVocal(); markDirty(); }
+
+function renderModulation() {
+  const el = $("modulation"); if (!el) return;
+  el.innerHTML = "";
+  const l = fxGlobal.lfo || (fxGlobal.lfo = { on: false, bars: 2, depth: 0.5 });
+  const lab = document.createElement("span"); lab.className = "em-label"; lab.textContent = "〜 Auto-filtro (LFO)";
+  el.appendChild(lab);
+  const on = document.createElement("button"); on.className = "mini" + (l.on ? " solo" : "");
+  on.textContent = l.on ? "ON" : "OFF"; on.title = "Filtro de máster que respira (sube/baja el brillo cíclicamente)";
+  on.onclick = () => { l.on = !l.on; applyLfo(); renderModulation(); setStatus(l.on ? "Auto-filtro <b>ON</b> — el track respira." : "Auto-filtro OFF."); };
+  el.appendChild(on);
+  const rate = document.createElement("label"); rate.className = "vocal-ctl";
+  rate.append(Object.assign(document.createElement("span"), { textContent: "Velocidad" }));
+  const rsel = document.createElement("select"); rsel.title = "Cada cuántos compases completa un ciclo";
+  [[1, "1 comp."], [2, "2 comp."], [4, "4 comp."], [8, "8 comp."]].forEach(([v, t]) => { const o = document.createElement("option"); o.value = v; o.textContent = t; if (v === l.bars) o.selected = true; rsel.appendChild(o); });
+  rsel.onchange = () => { l.bars = parseInt(rsel.value, 10); applyLfo(); };
+  rate.appendChild(rsel); el.appendChild(rate);
+  const dep = document.createElement("label"); dep.className = "vocal-ctl";
+  dep.append(Object.assign(document.createElement("span"), { textContent: "Profundidad" }));
+  const dinp = document.createElement("input"); dinp.type = "range"; dinp.min = "0"; dinp.max = "1"; dinp.step = "0.05"; dinp.value = l.depth; dinp.title = "Cuánto barre el filtro";
+  dinp.oninput = () => { l.depth = parseFloat(dinp.value); applyLfo(); };
+  dep.appendChild(dinp); el.appendChild(dep);
+}
 
 function renderVocal() {
   const el = $("vocal"); if (!el) return;
@@ -843,7 +891,7 @@ function buildVoices(opts = {}) {
   const dest = Tone.getDestination();
   // Para exportar STEMS queremos el sonido "en crudo" (sin la cadena de máster),
   // para que sumen bien y los mezcles/masterices en tu DAW. bypassMaster lo omite.
-  let master, out, masterGainNode = null;
+  let master, out, masterGainNode = null, autoFilter = null, masterLfo = null;
   if (opts.bypassMaster) {
     master = new Tone.Gain(0.85).connect(dest); out = master;
   } else {
@@ -855,7 +903,13 @@ function buildVoices(opts = {}) {
     sat.wet.value = 0.12;                                       // calidez sutil
     const glue = new Tone.Compressor({ threshold: -18, ratio: 2.5, attack: 0.02, release: 0.18 }).connect(sat);
     const eq = new Tone.EQ3({ low: -1, mid: 0, high: 1.5 }).connect(glue); // limpia graves, da aire
-    master = new Tone.Gain(0.85).connect(eq);
+    // Auto-filtro de máster modulado por LFO ("el track respira"). Siempre en la
+    // cadena; cuando el LFO está OFF queda abierto (sin efecto).
+    autoFilter = new Tone.Filter(18000, "lowpass").connect(eq);
+    masterLfo = new Tone.LFO({ frequency: 0.25, min: 18000, max: 18000, type: "sine" });
+    masterLfo.connect(autoFilter.frequency); masterLfo.start();
+    lfoSettings(masterLfo); // aplica fxGlobal.lfo
+    master = new Tone.Gain(0.85).connect(autoFilter);
   }
 
   // Returns globales de FX: reverb espacial + delay ping-pong (algorítmicos =
@@ -879,14 +933,15 @@ function buildVoices(opts = {}) {
     const comp = new Tone.Compressor({ threshold: compThreshold(m.comp || 0), ratio: 4, attack: 0.01, release: 0.12 });
     const drive = new Tone.WaveShaper(makeDriveCurve(m.drive || 0));
     const crush = new Tone.BitCrusher(crushBits(m.crush || 0));
+    const widener = new Tone.StereoWidener(m.width != null ? m.width : 0.5);
     const scGain = new Tone.Gain(1); // sidechain: baja por cada golpe de kick
-    // cadena de canal pro: EQ → comp → saturación → bitcrush → sidechain → máster
-    c.connect(eq); eq.connect(comp); comp.connect(drive); drive.connect(crush); crush.connect(scGain); scGain.connect(master);
+    // cadena de canal pro: EQ → comp → saturación → bitcrush → width → sidechain → máster
+    c.connect(eq); eq.connect(comp); comp.connect(drive); drive.connect(crush); crush.connect(widener); widener.connect(scGain); scGain.connect(master);
     const sendRev = new Tone.Gain(m.rev || 0);   scGain.connect(sendRev);   sendRev.connect(reverb);
     const sendDly = new Tone.Gain(m.delay || 0); scGain.connect(sendDly);   sendDly.connect(delay);
     meters[t.id] = new Tone.Meter(); scGain.connect(meters[t.id]);
     ch[t.id] = c;
-    fx[t.id] = { eq, comp, drive, crush, scGain, sendRev, sendDly };
+    fx[t.id] = { eq, comp, drive, crush, widener, scGain, sendRev, sendDly };
   }
   const masterMeter = new Tone.Meter();
   out.connect(masterMeter); // medir la SALIDA real (post-cadena de máster)
@@ -998,6 +1053,7 @@ function buildVoices(opts = {}) {
     rumbleSend,  // envío al sub-rumble (techno)
     vocalPlayer, // reproductor de la pista de vocal/loop
     masterGainNode, // ganancia de máster (mastering/LUFS)
+    masterLfo,   // LFO del auto-filtro de máster
     analyser,    // analizador de espectro (FFT) de la salida
     meters,      // medidores de nivel por pista
     masterMeter, // medidor de la salida (post-máster)
@@ -1185,41 +1241,45 @@ async function renderOffline(p, fx, inc, opts) {
 
 async function exportWav() {
   const totalBars = mode === "song" ? tramoBars.reduce((a, b) => a + b, 0) : 4;
-  setStatus(`Renderizando WAV (${totalBars} compases)… en tracks largos tarda unos segundos.`);
-  await new Promise((r) => setTimeout(r, 30)); // deja pintar el estado antes del render
-  const songData = activeSong();
-  const p = songData ? songData.song : repeatPattern(pattern, 4);
-  const fx = songData ? songData.fx : null;
-  const buffer = await renderOffline(p, fx, () => true, {});
-  TechnoMidi.download(encodeWav(buffer.get()), `technoforge-${mode}-${bpm()}bpm.wav`, "audio/wav");
-  setStatus("WAV exportado ✔");
+  showProgress(`Renderizando WAV (${totalBars} comp.)…`);
+  setStatus(`Renderizando WAV (${totalBars} compases)…`);
+  await new Promise((r) => setTimeout(r, 40)); // deja pintar el overlay antes del render
+  try {
+    const songData = activeSong();
+    const p = songData ? songData.song : repeatPattern(pattern, 4);
+    const fx = songData ? songData.fx : null;
+    const buffer = await renderOffline(p, fx, () => true, {});
+    TechnoMidi.download(encodeWav(buffer.get()), `technoforge-${mode}-${bpm()}bpm.wav`, "audio/wav");
+    setStatus("WAV exportado ✔");
+  } finally { hideProgress(); }
 }
 
 // Exporta cada instrumento como su propio WAV (en crudo, sin máster) dentro de
 // un único .zip — listo para arrastrar a Ableton/FL/Bitwig y rematar la mezcla.
 async function exportStems() {
-  setStatus("Renderizando stems… (una pasada por pista; en tracks largos tarda).");
-  await new Promise((r) => setTimeout(r, 30));
-  const songData = activeSong();
-  const p = songData ? songData.song : repeatPattern(pattern, 4);
-  const fx = songData ? songData.fx : null;
-  const files = [];
-  const n = () => String(files.length + 1).padStart(2, "0");
+  showProgress("Renderizando stems…");
+  await new Promise((r) => setTimeout(r, 40));
+  try {
+    const songData = activeSong();
+    const p = songData ? songData.song : repeatPattern(pattern, 4);
+    const fx = songData ? songData.fx : null;
+    const files = [];
+    const n = () => String(files.length + 1).padStart(2, "0");
 
-  for (const t of TRACKS) {
-    const buf = await renderOffline(p, null, (id) => id === t.id, { bypassMaster: true, flatMix: true });
-    files.push({ name: `${n()}-${t.id}.wav`, data: encodeWav(buf.get()) });
-    setStatus(`Stem ${t.name} listo ✔`);
-  }
-  // Stem aparte con los FX del arreglo (risers/impactos), solo en modo Track.
-  if (fx && fx.length) {
-    const buf = await renderOffline(p, fx, () => false, { bypassMaster: true, flatMix: true });
-    files.push({ name: `${n()}-fx.wav`, data: encodeWav(buf.get()) });
-  }
-
-  const zip = TechnoZip.create(files);
-  TechnoMidi.download(zip, `technoforge-stems-${mode}-${bpm()}bpm.zip`, "application/zip");
-  setStatus(`Stems exportados ✔ (${files.length} pistas) — descomprime y arrástralas a tu DAW.`);
+    for (const t of TRACKS) {
+      showProgress(`Stem ${t.name}… (${files.length + 1}/${TRACKS.length})`);
+      const buf = await renderOffline(p, null, (id) => id === t.id, { bypassMaster: true, flatMix: true });
+      files.push({ name: `${n()}-${t.id}.wav`, data: encodeWav(buf.get()) });
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    if (fx && fx.length) {
+      const buf = await renderOffline(p, fx, () => false, { bypassMaster: true, flatMix: true });
+      files.push({ name: `${n()}-fx.wav`, data: encodeWav(buf.get()) });
+    }
+    const zip = TechnoZip.create(files);
+    TechnoMidi.download(zip, `technoforge-stems-${mode}-${bpm()}bpm.zip`, "application/zip");
+    setStatus(`Stems exportados ✔ (${files.length} pistas) — descomprime y arrástralas a tu DAW.`);
+  } finally { hideProgress(); }
 }
 
 function exportMidiFile() {
@@ -1371,6 +1431,7 @@ function channelStrip(id, name, m, solo) {
     fxRow("comp", "CMP", "Compresor (pegada)"),
     fxRow("drive", "DRV", "Saturación / distorsión"),
     fxRow("crush", "CRU", "Bitcrusher (lo-fi)"),
+    fxRow("width", "WID", "Anchura estéreo (0=mono, 0.5=normal, 1=ancho)", 0, 1, 0.05),
     fxRow("sidechain", "SC", "Sidechain: baja con el kick"),
     fxRow("rev", "REV", "Envío a reverb espacial"),
     fxRow("delay", "DLY", "Envío a delay ping-pong"),
@@ -1688,6 +1749,7 @@ function init() {
   meterLoop(); // medidores del mezclador (se mueven al reproducir)
   drawSpectrum(); // analizador de espectro
   renderInstruments();
+  renderModulation();
   renderVocal();
 
   // Restaura el último proyecto (autoguardado) o genera uno nuevo

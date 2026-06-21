@@ -126,6 +126,9 @@
   <h2 class="zone-title" data-collapsible data-open="false">Instrumentos</h2>
   <section id="instruments" class="instruments"><!-- sintes editables por JS --></section>
 
+  <h2 class="zone-title" data-collapsible data-open="false">Modulación</h2>
+  <section id="modulation" class="vocal"><!-- LFO/auto-filtro por JS --></section>
+
   <h2 class="zone-title" data-collapsible data-open="true">Mezclador</h2>
   <section id="mixer" class="mixer"><!-- channel strips por JS --></section>
 
@@ -133,6 +136,10 @@
     <span id="status">Listo. Pulsa <b>Generar idea</b> y luego <b>Play</b>.</span>
     <span id="help" class="help"></span>
   </footer>
+
+  <div id="progress" class="progress" hidden>
+    <div class="progress-box"><div class="spinner"></div><span id="progressTxt">Renderizando…</span></div>
+  </div>
 
   <script src="src/midi.js"></script>
   <script src="src/zip.js"></script>
