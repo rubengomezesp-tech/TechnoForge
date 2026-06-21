@@ -28,6 +28,9 @@ const TRACKS = [
 // Cada estilo sesga la generación del patrón (carácter rítmico/percusivo)
 const STYLE_PARAMS = {
   hardgroove: { hat: 0.78, stab: 1, bass: 0.92, seventh: false },
+  schranz:    { hat: 0.92, stab: 0, bass: 0.88, seventh: false },
+  acid:       { hat: 0.66, stab: 1, bass: 0.96, seventh: false },
+  raw:        { hat: 0.82, stab: 1, bass: 0.82, seventh: false },
   peaktime:   { hat: 0.50, stab: 2, bass: 0.70, seventh: false },
   hypnotic:   { hat: 0.42, stab: 1, bass: 0.85, seventh: false },
   melodic:    { hat: 0.40, stab: 3, bass: 0.60, seventh: true  },
@@ -74,6 +77,8 @@ let live = null;
 let mix = defaultMix();       // mezclador por pista: { vol(dB), pan(-1..1), mute, solo }
 let fxGlobal = { rumble: 0, masterGain: 0, lufsTarget: -9, lfo: { on: false, bars: 2, depth: 0.5 } }; // FX globales + mastering + LFO
 let synth = defaultSynths();  // sintes editables (bajo y acordes): onda/filtro/ADSR
+let proMacros = defaultProMacros(); // macros de producción: tensión/groove/dirt/space
+let proBrief = "";            // briefing/reference textual local (sin backend)
 let projectName = "Mi track";
 let samples = {};             // sampler: { trackId: {name, url(dataURL)} } persistente
 let sampleBuffers = {};       // { trackId: Tone.ToneAudioBuffer } en memoria (decodificado)
@@ -128,6 +133,14 @@ function defaultMix() {
     m[t.id] = c;
   }
   return m;
+}
+function defaultProMacros() {
+  return { tension: 0.72, groove: 0.58, dirt: 0.46, space: 0.28 };
+}
+function normalizeProMacros(src) {
+  const d = defaultProMacros();
+  if (src) for (const k of Object.keys(d)) if (src[k] != null) d[k] = clamp(+src[k], 0, 1);
+  return d;
 }
 function mixOf(id) { return mix[id] || { vol: 0, pan: 0, mute: false, solo: false, low: 0, mid: 0, high: 0, comp: 0, drive: 0, crush: 0, width: 0.5, sidechain: 0, rev: 0, delay: 0 }; }
 
@@ -266,8 +279,7 @@ async function normalizeLoudness() {
   const lufs = await measureLoudness();
   const target = fxGlobal.lufsTarget;
   fxGlobal.masterGain = clamp(Math.round((fxGlobal.masterGain + (target - lufs)) * 10) / 10, -24, 24);
-  invalidateVoices();      // reconstruye con la ganancia nueva si está sonando
-  applyMasterGain();
+  applyMasterGain();       // la ganancia se aplica en vivo (sin reconstruir el grafo)
   lastLufs = target;       // tras ajustar, el loudness queda ≈ objetivo
   renderMixer();           // refresca lectura/slider del máster
   setStatus(`Normalizado (tramo activo): <b>${lufs.toFixed(1)}</b> → ${target} LUFS (ganancia ${fxGlobal.masterGain >= 0 ? "+" : ""}${fxGlobal.masterGain} dB). Hazlo desde tu drop.`);
@@ -278,6 +290,7 @@ const GENRE_PRESETS = {
   hardgroove: {
     bpm: 145, swing: 5, style: "hardgroove", emotion: "tension", energy: 88, rumble: 0.68,
     lufsTarget: -7, masterGain: -1.5, lfo: { on: true, bars: 4, depth: 0.35 },
+    macros: { tension: 0.82, groove: 0.72, dirt: 0.62, space: 0.24 },
     synth: {
       bass: { wave: "sawtooth", cutoff: 155, res: 5.5, decay: 0.16, sustain: 0.34, release: 0.09, slide: 0.018 },
       stab: { engine: "fm", fm: 13, cutoff: 3200, res: 2.2, decay: 0.15, sustain: 0, release: 0.12 },
@@ -289,6 +302,57 @@ const GENRE_PRESETS = {
       ohat: { vol: -2, pan: 0.2, high: 4, width: 0.85, rev: 0.08 },
       bass: { vol: 1, low: -2, mid: 1, drive: 0.45, comp: 0.45, sidechain: 0.72 },
       stab: { vol: -4, mid: -1, high: 2, drive: 0.32, crush: 0.18, sidechain: 0.62, rev: 0.28, delay: 0.12 },
+    },
+  },
+  schranz: {
+    bpm: 155, swing: 2, style: "schranz", emotion: "tension", energy: 96, rumble: 0.78,
+    lufsTarget: -7, masterGain: -2, lfo: { on: true, bars: 2, depth: 0.25 },
+    macros: { tension: 0.94, groove: 0.48, dirt: 0.88, space: 0.14 },
+    synth: {
+      bass: { wave: "square", cutoff: 115, res: 6, decay: 0.11, sustain: 0.26, release: 0.06, slide: 0.006 },
+      stab: { engine: "fm", fm: 18, cutoff: 1900, res: 4, decay: 0.09, sustain: 0, release: 0.08 },
+    },
+    fx: {
+      kick: { vol: 5, low: 4, mid: -1, drive: 0.72, comp: 0.7 },
+      clap: { vol: -2, crush: 0.28, comp: 0.45, rev: 0.04 },
+      chat: { vol: -4, high: 5, comp: 0.45, drive: 0.28, crush: 0.2, width: 0.55 },
+      ohat: { vol: -4, high: 4, drive: 0.22, crush: 0.16, width: 0.58 },
+      bass: { vol: 2, low: -4, mid: 2, drive: 0.72, comp: 0.62, crush: 0.22, sidechain: 0.78 },
+      stab: { vol: -8, mid: 2, high: -1, drive: 0.55, crush: 0.34, sidechain: 0.66, rev: 0.1, delay: 0.04 },
+    },
+  },
+  acid: {
+    bpm: 142, swing: 9, style: "acid", emotion: "oscuridad", energy: 84, rumble: 0.52,
+    lufsTarget: -8, masterGain: -1, lfo: { on: true, bars: 4, depth: 0.45 },
+    macros: { tension: 0.74, groove: 0.82, dirt: 0.55, space: 0.34 },
+    synth: {
+      bass: { wave: "sawtooth", cutoff: 240, res: 9.5, decay: 0.12, sustain: 0.2, release: 0.08, slide: 0.095 },
+      stab: { engine: "pluck", cutoff: 4200, res: 1.2, decay: 0.12, sustain: 0, release: 0.08 },
+    },
+    fx: {
+      kick: { vol: 3, low: 2, drive: 0.38, comp: 0.5 },
+      clap: { vol: -1, comp: 0.32, rev: 0.12 },
+      chat: { vol: -6, pan: -0.15, high: 4, width: 0.78 },
+      ohat: { vol: -3, pan: 0.2, high: 4, width: 0.86, delay: 0.05 },
+      bass: { vol: 2, low: -3, mid: 3, high: -2, drive: 0.48, comp: 0.38, sidechain: 0.64, delay: 0.06 },
+      stab: { vol: -6, high: 2, drive: 0.18, sidechain: 0.58, rev: 0.26, delay: 0.18 },
+    },
+  },
+  raw: {
+    bpm: 148, swing: 3, style: "raw", emotion: "oscuridad", energy: 92, rumble: 0.72,
+    lufsTarget: -7, masterGain: -2, lfo: { on: true, bars: 8, depth: 0.22 },
+    macros: { tension: 0.88, groove: 0.54, dirt: 0.92, space: 0.18 },
+    synth: {
+      bass: { wave: "square", cutoff: 135, res: 5.5, decay: 0.13, sustain: 0.28, release: 0.07, slide: 0.012 },
+      stab: { engine: "fm", fm: 16, cutoff: 2400, res: 3.5, decay: 0.11, sustain: 0, release: 0.09 },
+    },
+    fx: {
+      kick: { vol: 5, low: 3, drive: 0.66, comp: 0.66, crush: 0.08 },
+      clap: { vol: -2, drive: 0.32, crush: 0.3, comp: 0.44 },
+      chat: { vol: -5, high: 4, drive: 0.36, crush: 0.32, width: 0.52 },
+      ohat: { vol: -4, high: 4, drive: 0.28, crush: 0.2, width: 0.64 },
+      bass: { vol: 1, low: -3, mid: 2, drive: 0.68, comp: 0.55, crush: 0.28, sidechain: 0.74 },
+      stab: { vol: -7, mid: 1, drive: 0.48, crush: 0.32, sidechain: 0.62, rev: 0.16, delay: 0.08 },
     },
   },
   hard: {
@@ -313,32 +377,48 @@ const GENRE_PRESETS = {
   },
 };
 
+function setControlValue(id, v) {
+  const el = $(id); if (!el || v == null) return;
+  el.value = v;
+  const out = $(id + "Out"); if (out) out.textContent = v;
+}
+
 function applyGenrePreset(name) {
   const g = GENRE_PRESETS[name]; if (!g) return;
-  const setR = (id, v) => { const el = $(id); if (el) { el.value = v; const o = $(id + "Out"); if (o) o.textContent = v; } };
-  if (g.bpm) { setR("bpm", g.bpm); if (window.Tone) Tone.Transport.bpm.value = g.bpm; }
-  if (g.swing != null) setR("swing", g.swing);
+  if (g.bpm) { setControlValue("bpm", g.bpm); if (window.Tone) Tone.Transport.bpm.value = g.bpm; }
+  if (g.swing != null) setControlValue("swing", g.swing);
   if (g.style) $("style").value = g.style;
   if (g.emotion) { $("emotion").value = g.emotion; $("scale").value = currentEmotion().scale; }
-  if (g.energy != null) setR("energy", g.energy);
-  if (g.rumble != null) { fxGlobal.rumble = g.rumble; setR("rumble", Math.round(g.rumble * 100)); }
+  if (g.energy != null) setControlValue("energy", g.energy);
+  if (g.rumble != null) { fxGlobal.rumble = g.rumble; setControlValue("rumble", Math.round(g.rumble * 100)); }
   if (g.masterGain != null) fxGlobal.masterGain = g.masterGain;
   if (g.lufsTarget != null) fxGlobal.lufsTarget = g.lufsTarget;
   if (g.lfo) fxGlobal.lfo = { ...fxGlobal.lfo, ...g.lfo };
+  if (g.macros) proMacros = normalizeProMacros(g.macros);
   synth = defaultSynths();
   if (g.synth) for (const k of ["bass", "stab"]) if (g.synth[k]) Object.assign(synth[k], g.synth[k]);
   mix = defaultMix();
   if (g.fx) for (const id of Object.keys(g.fx)) if (mix[id]) Object.assign(mix[id], g.fx[id]);
   invalidateVoices();
-  renderInstruments(); renderModulation(); renderMixer();
+  renderInstruments(); renderModulation(); renderMixer(); renderProDesk(); renderAutomation();
   markDirty();
   setStatus(`Preset <b>${name}</b> aplicado. Pulsa <b>🎲 Generar idea</b> para un patrón del estilo, o <b>Play</b>.`);
 }
 
+// Destruye el grafo de audio anterior (evita fuga de nodos que cuelgan la app:
+// BitCrushers en el hilo principal, reproductores de vocal apilados, LFOs…).
+function disposeLive() {
+  if (!live) return;
+  try { if (live.out) live.out.disconnect(); } catch (e) {}
+  try { if (live.masterLfo) live.masterLfo.dispose(); } catch (e) {}
+  try { if (live.vocalPlayer) { live.vocalPlayer.unsync(); live.vocalPlayer.stop(); live.vocalPlayer.dispose(); } } catch (e) {}
+}
+function resetLive() { disposeLive(); live = null; }
+
 // Invalida las voces tras un cambio de grafo (motor FM, samples). Si está
 // sonando, las reconstruye y rehace la secuencia para oír el cambio al instante.
 function invalidateVoices() {
-  live = null;
+  resetLive();
   if (window.Tone && Tone.Transport && Tone.Transport.state === "started") {
     live = buildVoices();
     buildSequence();
@@ -421,6 +501,8 @@ function getProject() {
     mix,
     fxGlobal,
     synth,
+    proMacros,
+    proBrief,
     samples,
     vocal,
   };
@@ -466,6 +548,8 @@ function loadProject(p) {
     lfo: g.lfo ? { on: !!g.lfo.on, bars: g.lfo.bars || 2, depth: g.lfo.depth != null ? g.lfo.depth : 0.5 } : { on: false, bars: 2, depth: 0.5 } };
   if ($("rumble")) { $("rumble").value = Math.round(fxGlobal.rumble * 100); $("rumbleOut").textContent = $("rumble").value; }
   synth = normalizeSynths(p.synth);
+  proMacros = normalizeProMacros(p.proMacros);
+  proBrief = p.proBrief || "";
   // Sampler: re-decodifica los samples guardados en buffers de audio
   samples = {}; sampleBuffers = {};
   if (p.samples && window.Tone) {
@@ -473,7 +557,7 @@ function loadProject(p) {
       const s = p.samples[id];
       if (s && s.url) {
         samples[id] = s;
-        const tb = new Tone.ToneAudioBuffer(s.url, () => { sampleBuffers[id] = tb; live = null; renderGrid(); });
+        const tb = new Tone.ToneAudioBuffer(s.url, () => { sampleBuffers[id] = tb; resetLive(); renderGrid(); });
       }
     }
   }
@@ -483,15 +567,15 @@ function loadProject(p) {
   if (p.vocal) {
     vocal = { name: p.vocal.name || null, url: p.vocal.url || null, bars: p.vocal.bars || 4, vol: p.vocal.vol || 0, mute: !!p.vocal.mute };
     if (vocal.url && window.Tone) {
-      const tb = new Tone.ToneAudioBuffer(vocal.url, () => { vocalBuffer = tb; live = null; renderVocal(); });
+      const tb = new Tone.ToneAudioBuffer(vocal.url, () => { vocalBuffer = tb; resetLive(); renderVocal(); });
     }
   }
   mode = p.mode === "song" ? "song" : "loop";
   $("modeBtn").textContent = mode === "song" ? "🎚️ Track" : "🔁 Bucle";
   if ($("projName")) $("projName").value = projectName;
-  built = null; live = null; // reconstruir voces con la mezcla nueva
+  built = null; resetLive(); // reconstruir voces con la mezcla nueva
   if (window.Tone && Tone.Transport) Tone.Transport.bpm.value = bpm();
-  refreshSong(); renderGrid(); renderTimeline(); renderInstruments(); renderModulation(); renderVocal();
+  refreshSong(); renderGrid(); renderTimeline(); renderAutomation(); renderInstruments(); renderModulation(); renderVocal(); renderProDesk();
   return true;
 }
 
@@ -534,8 +618,11 @@ function newProject() {
   samples = {}; sampleBuffers = {};
   patterns = [blankPattern()]; current = 0; pattern = patterns[0]; tramoBars = [4]; tramoFx = ["none"]; tramoVocal = [true];
   fxGlobal = { rumble: 0, masterGain: 0, lufsTarget: -9, lfo: { on: false, bars: 2, depth: 0.5 } };
+  proMacros = defaultProMacros();
+  proBrief = "";
   if ($("rumble")) { $("rumble").value = 0; $("rumbleOut").textContent = "0"; }
   renderModulation();
+  renderProDesk(); renderAutomation();
   synth = defaultSynths(); renderInstruments();
   vocal = { name: null, url: null, bars: 4, vol: 0, mute: false }; vocalBuffer = null; renderVocal();
   if ($("projName")) $("projName").value = projectName;
@@ -888,19 +975,24 @@ function generate() {
   const sc = SCALES[scaleId()];
   const em = currentEmotion();
   const p = blankPattern();
+  const sid = styleId();
 
   // Bombo 4x4
   [0, 4, 8, 12].forEach((s) => (p.kick[s] = true));
   if (e > 0.7 && rnd() < 0.4) p.kick[14] = true;
-  if (styleId() === "hardgroove") {
+  if (["hardgroove", "schranz", "raw"].includes(sid)) {
     p.kick[15] = true;
     p.mods.kick[15] = { p: 0.55, r: 1 };
+  }
+  if (sid === "schranz") {
+    p.kick[3] = true; p.mods.kick[3] = { p: 0.42, r: 1 };
+    p.kick[11] = true; p.mods.kick[11] = { p: 0.38, r: 1 };
   }
 
   // Clap en 2 y 4
   p.clap[4] = true;
   p.clap[12] = true;
-  if (styleId() === "hardgroove" && e > 0.65) {
+  if (["hardgroove", "raw"].includes(sid) && e > 0.65) {
     p.clap[15] = true;
     p.mods.clap[15] = { p: 0.45, r: 1 };
   }
@@ -915,10 +1007,13 @@ function generate() {
     const dens = (s % 2 === 0 ? sp.hat + 0.15 : sp.hat) + e * 0.3;
     if (rnd() < dens) p.chat[s] = true;
   }
-  if (styleId() === "hardgroove") {
+  if (["hardgroove", "schranz", "raw"].includes(sid)) {
     [1, 3, 5, 7, 9, 11, 13, 15].forEach((s) => (p.chat[s] = true));
-    [3, 7, 11, 15].forEach((s) => (p.mods.chat[s] = { p: 0.8, r: 2 }));
+    [3, 7, 11, 15].forEach((s) => (p.mods.chat[s] = { p: sid === "schranz" ? 0.92 : 0.8, r: sid === "schranz" ? 3 : 2 }));
     p.mods.ohat[14] = { p: 1, r: 2 };
+  }
+  if (sid === "acid") {
+    [3, 7, 11, 15].forEach((s) => { p.chat[s] = true; p.mods.chat[s] = { p: 0.7, r: 2 }; });
   }
 
   // Bajo rodante — la fundamental sigue el acorde de cada tiempo (la armonía se mueve)
@@ -931,9 +1026,16 @@ function generate() {
     }
   });
   if (p.bass[2] == null) p.bass[2] = bassNoteAt(2);
-  if (styleId() === "hardgroove") {
+  if (["hardgroove", "schranz", "raw"].includes(sid)) {
     [1, 2, 3, 6, 7, 9, 10, 11, 14, 15].forEach((s) => {
       if (p.bass[s] == null && rnd() < 0.9) p.bass[s] = bassNoteAt(s);
+    });
+  }
+  if (sid === "acid") {
+    [1, 2, 3, 5, 6, 7, 10, 11, 13, 14, 15].forEach((s) => {
+      const base = bassNoteAt(s);
+      p.bass[s] = rnd() > 0.72 ? base + 12 : base;
+      if (rnd() > 0.58) p.mods.bass[s] = { p: 1, r: 2 };
     });
   }
 
@@ -951,7 +1053,7 @@ function generate() {
   built = null;
   // Si no está sonando, fuerza recrear las voces (para que el cambio de estilo
   // — p.ej. el bajo reese — se aplique en la siguiente reproducción).
-  if (Tone.Transport.state !== "started") live = null;
+  if (Tone.Transport.state !== "started") resetLive();
   refreshSong();
   renderGrid();
   setStatus(mode === "song"
@@ -1309,6 +1411,7 @@ function buildVoices(opts = {}) {
     analyser,    // analizador de espectro (FFT) de la salida
     meters,      // medidores de nivel por pista
     masterMeter, // medidor de la salida (post-máster)
+    out,         // nodo final (para desconectar al destruir el grafo)
     bassSynth: bass, stabSynth: stab, stabFilter, // sintes (para ajuste en vivo)
     kick: (t) => players.kick ? players.kick.start(t) : kick.triggerAttackRelease("C1", "8n", t),
     clap: (t) => {

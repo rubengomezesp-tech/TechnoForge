@@ -450,10 +450,89 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px 
     gap: var(--s-4);
     padding: var(--s-4);
   }
-  .controls label, .controls select, .controls input[type="range"] { min-width: 0; width: 100%; }
+.controls label, .controls select, .controls input[type="range"] { min-width: 0; width: 100%; }
   .timeline { overflow-x: auto; padding-bottom: var(--s-2); }
   .sec { min-width: 76px; }
   .brand .tag { display: none; }
+}
+
+/* --------------------------------------------------------- Pro desk -------- */
+.prodesk {
+  display: grid;
+  grid-template-columns: minmax(280px, 1.25fr) minmax(360px, 2fr);
+  gap: var(--s-4);
+  padding: var(--s-4) var(--s-5) 0;
+}
+.pro-brief,
+.pro-macros {
+  background: var(--surface-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  padding: var(--s-4);
+}
+.pro-title {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--s-3);
+  margin-bottom: var(--s-3);
+  font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); font-weight: 700;
+}
+.pro-badge { color: var(--accent-2); letter-spacing: 0; text-transform: none; font-size: 11px; }
+.pro-row { display: flex; gap: var(--s-2); align-items: center; flex-wrap: wrap; }
+.pro-brief textarea {
+  width: 100%; min-height: 78px; resize: vertical;
+  background: var(--surface-3); color: var(--ink);
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+  padding: 10px 11px; font: inherit; line-height: 1.4;
+}
+.pro-brief textarea::placeholder { color: var(--muted); }
+.pro-actions { margin-top: var(--s-3); display: flex; gap: var(--s-2); flex-wrap: wrap; }
+.pro-actions button { padding: 8px 11px; font-size: 12px; }
+.macro-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--s-3); }
+.macro {
+  min-width: 0;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: var(--s-3);
+}
+.macro label {
+  display: flex; justify-content: space-between; gap: var(--s-2);
+  color: var(--muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: .07em; font-weight: 700;
+}
+.macro b { color: var(--accent-2); font-variant-numeric: tabular-nums; }
+.macro input[type="range"] { width: 100%; margin-top: var(--s-2); }
+.automation {
+  display: grid;
+  grid-template-columns: repeat(var(--auto-count, 1), minmax(82px, 1fr));
+  gap: var(--s-1);
+  padding: var(--s-2) var(--s-5) 0;
+}
+.automation:empty { display: none; }
+.auto-seg {
+  position: relative; overflow: hidden;
+  min-height: 42px;
+  background: var(--surface-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 7px 8px;
+}
+.auto-seg::before {
+  content: "";
+  position: absolute; inset: auto 0 0 0; height: calc(var(--tension, .5) * 100%);
+  background: linear-gradient(180deg, rgba(255,77,94,.02), rgba(255,77,94,.24));
+}
+.auto-name, .auto-meta { position: relative; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.auto-name { color: var(--ink-2); font-size: 11px; font-weight: 700; }
+.auto-meta { color: var(--muted); font-size: 10px; margin-top: 3px; }
+
+@media (max-width: 960px) {
+  .prodesk { grid-template-columns: 1fr; }
+  .macro-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 720px) {
+  .prodesk { padding: var(--s-4); }
+  .macro-grid { grid-template-columns: 1fr; }
+  .automation { overflow-x: auto; grid-template-columns: repeat(var(--auto-count, 1), minmax(116px, 1fr)); padding: var(--s-2) var(--s-4) 0; }
 }
 
 /* ----------------------------------------------------- Progreso export ----- */
