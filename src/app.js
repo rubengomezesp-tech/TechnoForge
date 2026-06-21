@@ -27,6 +27,7 @@ const TRACKS = [
 
 // Cada estilo sesga la generación del patrón (carácter rítmico/percusivo)
 const STYLE_PARAMS = {
+  hardgroove: { hat: 0.78, stab: 1, bass: 0.92, seventh: false },
   peaktime:   { hat: 0.50, stab: 2, bass: 0.70, seventh: false },
   hypnotic:   { hat: 0.42, stab: 1, bass: 0.85, seventh: false },
   melodic:    { hat: 0.40, stab: 3, bass: 0.60, seventh: true  },
@@ -274,6 +275,22 @@ async function normalizeLoudness() {
 
 // Presets de sonido de 1 clic: moldean controles + síntesis + mezcla + FX + rumble
 const GENRE_PRESETS = {
+  hardgroove: {
+    bpm: 145, swing: 5, style: "hardgroove", emotion: "tension", energy: 88, rumble: 0.68,
+    lufsTarget: -7, masterGain: -1.5, lfo: { on: true, bars: 4, depth: 0.35 },
+    synth: {
+      bass: { wave: "sawtooth", cutoff: 155, res: 5.5, decay: 0.16, sustain: 0.34, release: 0.09, slide: 0.018 },
+      stab: { engine: "fm", fm: 13, cutoff: 3200, res: 2.2, decay: 0.15, sustain: 0, release: 0.12 },
+    },
+    fx: {
+      kick: { vol: 4, drive: 0.5, comp: 0.55, low: 3 },
+      clap: { vol: 0, pan: -0.15, comp: 0.35, drive: 0.15, rev: 0.08 },
+      chat: { vol: -5, pan: 0.1, high: 4, comp: 0.25, width: 0.75 },
+      ohat: { vol: -2, pan: 0.2, high: 4, width: 0.85, rev: 0.08 },
+      bass: { vol: 1, low: -2, mid: 1, drive: 0.45, comp: 0.45, sidechain: 0.72 },
+      stab: { vol: -4, mid: -1, high: 2, drive: 0.32, crush: 0.18, sidechain: 0.62, rev: 0.28, delay: 0.12 },
+    },
+  },
   hard: {
     bpm: 140, swing: 6, style: "industrial", emotion: "oscuridad", rumble: 0.5,
     synth: { bass: { wave: "sawtooth", cutoff: 130, res: 4, slide: 0 }, stab: { engine: "saw", cutoff: 1800, res: 2 } },
@@ -303,13 +320,17 @@ function applyGenrePreset(name) {
   if (g.swing != null) setR("swing", g.swing);
   if (g.style) $("style").value = g.style;
   if (g.emotion) { $("emotion").value = g.emotion; $("scale").value = currentEmotion().scale; }
+  if (g.energy != null) setR("energy", g.energy);
   if (g.rumble != null) { fxGlobal.rumble = g.rumble; setR("rumble", Math.round(g.rumble * 100)); }
+  if (g.masterGain != null) fxGlobal.masterGain = g.masterGain;
+  if (g.lufsTarget != null) fxGlobal.lufsTarget = g.lufsTarget;
+  if (g.lfo) fxGlobal.lfo = { ...fxGlobal.lfo, ...g.lfo };
   synth = defaultSynths();
   if (g.synth) for (const k of ["bass", "stab"]) if (g.synth[k]) Object.assign(synth[k], g.synth[k]);
   mix = defaultMix();
   if (g.fx) for (const id of Object.keys(g.fx)) if (mix[id]) Object.assign(mix[id], g.fx[id]);
   invalidateVoices();
-  renderInstruments(); renderMixer();
+  renderInstruments(); renderModulation(); renderMixer();
   markDirty();
   setStatus(`Preset <b>${name}</b> aplicado. Pulsa <b>🎲 Generar idea</b> para un patrón del estilo, o <b>Play</b>.`);
 }
@@ -823,6 +844,7 @@ function renderTramos() {
 function rootPc()  { return parseInt($("root").value, 10); }
 function scaleId() { return $("scale").value; }
 function styleId() { return $("style").value; }
+function styleParams() { return STYLE_PARAMS[styleId()] || STYLE_PARAMS.peaktime; }
 function bpm()     { return parseInt($("bpm").value, 10); }
 function energy()  { return parseInt($("energy").value, 10) / 100; }
 function swingAmt(){ return parseInt($("swing").value, 10) / 100; }
@@ -830,7 +852,7 @@ function humanizeAmt(){ const el = $("humanize"); return el ? parseInt(el.value,
 
 function emotionId()     { return $("emotion").value; }
 function currentEmotion(){ return EMOTIONS[emotionId()] || EMOTIONS.melancolia; }
-function wantSeventh()   { return STYLE_PARAMS[styleId()].seventh || currentEmotion().seventh; }
+function wantSeventh()   { return styleParams().seventh || currentEmotion().seventh; }
 
 // Grado de la progresión que toca en el paso s (un acorde por tiempo = 4 pasos)
 function progAt(s) {
@@ -862,7 +884,7 @@ function bassNoteAt(s) {
 // ----------------------------------------------------------------------------
 function generate() {
   const e = energy();
-  const sp = STYLE_PARAMS[styleId()];
+  const sp = styleParams();
   const sc = SCALES[scaleId()];
   const em = currentEmotion();
   const p = blankPattern();
@@ -870,10 +892,18 @@ function generate() {
   // Bombo 4x4
   [0, 4, 8, 12].forEach((s) => (p.kick[s] = true));
   if (e > 0.7 && rnd() < 0.4) p.kick[14] = true;
+  if (styleId() === "hardgroove") {
+    p.kick[15] = true;
+    p.mods.kick[15] = { p: 0.55, r: 1 };
+  }
 
   // Clap en 2 y 4
   p.clap[4] = true;
   p.clap[12] = true;
+  if (styleId() === "hardgroove" && e > 0.65) {
+    p.clap[15] = true;
+    p.mods.clap[15] = { p: 0.45, r: 1 };
+  }
 
   // Open hats al contratiempo
   [2, 6, 10, 14].forEach((s) => (p.ohat[s] = true));
@@ -884,6 +914,11 @@ function generate() {
     if (p.ohat[s]) continue;
     const dens = (s % 2 === 0 ? sp.hat + 0.15 : sp.hat) + e * 0.3;
     if (rnd() < dens) p.chat[s] = true;
+  }
+  if (styleId() === "hardgroove") {
+    [1, 3, 5, 7, 9, 11, 13, 15].forEach((s) => (p.chat[s] = true));
+    [3, 7, 11, 15].forEach((s) => (p.mods.chat[s] = { p: 0.8, r: 2 }));
+    p.mods.ohat[14] = { p: 1, r: 2 };
   }
 
   // Bajo rodante — la fundamental sigue el acorde de cada tiempo (la armonía se mueve)
@@ -896,6 +931,11 @@ function generate() {
     }
   });
   if (p.bass[2] == null) p.bass[2] = bassNoteAt(2);
+  if (styleId() === "hardgroove") {
+    [1, 2, 3, 6, 7, 9, 10, 11, 14, 15].forEach((s) => {
+      if (p.bass[s] == null && rnd() < 0.9) p.bass[s] = bassNoteAt(s);
+    });
+  }
 
   // Acordes: progresión emocional en los cuatro tiempos (columna armónica)…
   const seventh = wantSeventh();
@@ -975,6 +1015,77 @@ function mutate(p) {
   // Ghost de bombo
   if (rnd() < 0.5) m.kick[14] = !m.kick[14];
   return m;
+}
+
+function silenceTrack(p, id) {
+  p[id] = (id === "bass" || id === "stab") ? arr16(null) : arr16(false);
+  if (p.mods && p.mods[id]) p.mods[id] = arr16(null);
+}
+
+function keepOnly(p, ids) {
+  const out = deepCopy(p);
+  const keep = new Set(ids);
+  for (const id of NOTE_KEYS) if (!keep.has(id)) silenceTrack(out, id);
+  return out;
+}
+
+function tightenForHardGroove(p) {
+  [0, 4, 8, 12].forEach((s) => (p.kick[s] = true));
+  p.kick[15] = true; p.mods.kick[15] = { p: 0.55, r: 1 };
+  p.clap[4] = true; p.clap[12] = true;
+  [2, 6, 10, 14].forEach((s) => (p.ohat[s] = true));
+  [1, 3, 5, 7, 9, 11, 13, 15].forEach((s) => (p.chat[s] = true));
+  [3, 7, 11, 15].forEach((s) => (p.mods.chat[s] = { p: 0.82, r: 2 }));
+  p.mods.ohat[14] = { p: 1, r: 2 };
+  [1, 2, 3, 6, 7, 9, 10, 11, 14, 15].forEach((s) => {
+    if (p.bass[s] == null) p.bass[s] = bassNoteAt(s);
+  });
+  [0, 8].forEach((s) => { if (p.stab[s] == null) p.stab[s] = chordAt(progAt(s), 48, wantSeventh()); });
+  return p;
+}
+
+function makeBreakPattern(src) {
+  const out = keepOnly(src, ["chat", "ohat", "stab"]);
+  [0, 4, 8, 12].forEach((s) => {
+    if (out.stab[s] == null) out.stab[s] = chordAt(progAt(s), 48, wantSeventh());
+  });
+  [1, 5, 9, 13].forEach((s) => (out.chat[s] = false));
+  return out;
+}
+
+function createHardTechnoTrack() {
+  if ($("preset")) $("preset").value = "hardgroove";
+  applyGenrePreset("hardgroove");
+  generate();
+
+  const dropA = tightenForHardGroove(deepCopy(pattern));
+  const dropB = tightenForHardGroove(mutate(dropA));
+  const intro = keepOnly(dropA, ["kick", "chat", "ohat"]);
+  [1, 5, 9, 13].forEach((s) => (intro.chat[s] = false));
+  const build = keepOnly(dropA, ["kick", "chat", "ohat", "bass"]);
+  const breakP = makeBreakPattern(dropA);
+  const outro = keepOnly(dropA, ["kick", "chat"]);
+  [3, 7, 11, 15].forEach((s) => { outro.chat[s] = false; outro.mods.chat[s] = null; });
+
+  patterns = [intro, build, dropA, breakP, dropB, outro];
+  tramoBars = [4, 8, 16, 8, 16, 4];
+  tramoFx = ["none", "riser", "drop", "riser", "drop", "none"];
+  tramoVocal = patterns.map(() => true);
+  barsPerTramo = 8;
+  current = 2;
+  pattern = patterns[current];
+  mode = "song";
+  built = buildSong();
+  $("modeBtn").textContent = "🎚️ Track";
+  refreshSong();
+  renderGrid();
+  renderTimeline();
+  renderInstruments();
+  renderModulation();
+  renderMixer();
+  resync();
+  markDirty();
+  setStatus("Track hard listo: <b>Intro · Build · Drop · Break · Drop 2 · Outro</b>. Pulsa <b>Play</b> o exporta MIDI/Stems.");
 }
 
 // ----------------------------------------------------------------------------
@@ -1890,6 +2001,7 @@ function setStatus(html) { $("status").innerHTML = html; }
 function init() {
   $("playBtn").onclick = togglePlay;
   $("genBtn").onclick = generate;
+  if ($("hardTrackBtn")) $("hardTrackBtn").onclick = createHardTechnoTrack;
   $("modeBtn").onclick = toggleMode;
   $("midiBtn").onclick = exportMidiFile;
   $("wavBtn").onclick = exportWav;
@@ -1901,6 +2013,15 @@ function init() {
   $("newBtn").onclick = newProject;
   $("loadBtn").onclick = () => $("loadInput").click();
   $("midiCtrl").onclick = enableMIDI;
+
+  // Guía rápida: primera vez automática, reabrible con ?
+  const showGuide = () => { $("guide").hidden = false; };
+  const hideGuide = () => { $("guide").hidden = true; try { localStorage.setItem("technoforge.seenGuide", "1"); } catch (e) {} };
+  $("guideBtn").onclick = showGuide;
+  $("guideClose").onclick = hideGuide;
+  $("guideStart").onclick = hideGuide;
+  $("guide").onclick = (e) => { if (e.target.id === "guide") hideGuide(); };
+  try { if (!localStorage.getItem("technoforge.seenGuide")) showGuide(); } catch (e) {}
   $("loadInput").onchange = (e) => { if (e.target.files[0]) loadProjectFile(e.target.files[0]); e.target.value = ""; };
   $("sampleInput").onchange = (e) => { if (e.target.files[0] && sampleTarget) loadSampleFile(e.target.files[0], sampleTarget); e.target.value = ""; };
   $("vocalInput").onchange = (e) => { if (e.target.files[0]) loadVocalFile(e.target.files[0]); e.target.value = ""; };

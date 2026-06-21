@@ -20,12 +20,31 @@
     <div class="transport">
       <button id="playBtn" class="primary">▶ Play</button>
       <button id="genBtn">🎲 Generar idea</button>
+      <button id="hardTrackBtn" class="accent">⚡ Track duro</button>
       <button id="modeBtn">🔁 Bucle</button>
       <button id="midiBtn">⬇ MIDI</button>
       <button id="wavBtn">⬇ WAV</button>
       <button id="stemsBtn">⬇ Stems</button>
+      <button id="guideBtn" title="Guía rápida: cómo hacer una canción">?</button>
     </div>
   </header>
+
+  <div id="guide" class="guide" hidden>
+    <div class="guide-card">
+      <button id="guideClose" class="guide-x" title="Cerrar">✕</button>
+      <h2>Cómo hacer una canción</h2>
+      <p class="guide-sub">6 pasos. Puedes reabrir esta guía con el botón <b>?</b> de arriba.</p>
+      <ol class="guide-steps">
+        <li><b>Crea el ritmo.</b> Elige un <b>Preset</b> (p. ej. Hard Techno) o pulsa <b>🎲 Generar idea</b>. Pulsa <b>▶ Play</b> para escucharlo.</li>
+        <li><b>Edítalo.</b> Toca las <b>celdas</b> de la rejilla para añadir/quitar golpes. Bajo cada pista ves su papel (Kick = el pulso).</li>
+        <li><b>Dale carácter.</b> En el <b>Mezclador</b>, haz clic en un canal (Bass, Stab…) y mueve sus <b>Efectos</b> (EQ, saturación, reverb) abajo.</li>
+        <li><b>Crea las secciones.</b> Pulsa <b>➕ Nuevo tramo</b> para cada parte (intro, build, drop…). A cada tramo ponle sus <b>Compases</b> y su <b>Transición</b> (🔥 Drop).</li>
+        <li><b>Escucha el tema entero.</b> Cambia <b>🔁 Bucle → 🎚️ Track</b> y pulsa <b>Play</b>: suenan todos los tramos en orden.</li>
+        <li><b>Exporta.</b> En el <b>MÁSTER</b> pulsa <b>Normaliz.</b> (volumen de club) y luego <b>⬇ WAV</b> (o <b>Stems</b> para tu DAW).</li>
+      </ol>
+      <button id="guideStart" class="primary guide-start">Empezar a crear 🎶</button>
+    </div>
+  </div>
 
   <section class="projectbar">
     <span class="pb-label">Proyecto</span>
@@ -44,6 +63,7 @@
     <label>Preset
       <select id="preset" title="Sonido completo de un estilo (mezcla + síntesis + FX)">
         <option value="">— elige —</option>
+        <option value="hardgroove">Hard Groove 145</option>
         <option value="hard">Hard Techno</option>
         <option value="melodic">Melódico</option>
         <option value="hypnotic">Hipnótico</option>
@@ -51,18 +71,23 @@
       </select>
     </label>
     <label>BPM
-      <input id="bpm" type="range" min="118" max="140" value="128" />
+      <input id="bpm" type="range" min="118" max="160" value="128" />
       <output id="bpmOut">128</output>
     </label>
     <label>Tonalidad
       <select id="root">
-        <option value="9">A</option>
-        <option value="11">B</option>
         <option value="0">C</option>
+        <option value="1">C#</option>
         <option value="2">D</option>
+        <option value="3">D#</option>
         <option value="4">E</option>
         <option value="5">F</option>
+        <option value="6">F#</option>
         <option value="7">G</option>
+        <option value="8">G#</option>
+        <option value="9" selected>A</option>
+        <option value="10">A#</option>
+        <option value="11">B</option>
       </select>
     </label>
     <label>Emoción
@@ -88,6 +113,7 @@
     </label>
     <label>Estilo
       <select id="style">
+        <option value="hardgroove">Hard Groove</option>
         <option value="peaktime">Peak-time</option>
         <option value="hypnotic">Hipnótico</option>
         <option value="melodic">Melódico</option>

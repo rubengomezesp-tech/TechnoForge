@@ -110,6 +110,17 @@ button.primary.playing {
   border-color: var(--accent-2);
   color: #04221c;
 }
+button.accent {
+  background: var(--accent-2-soft);
+  border-color: color-mix(in srgb, var(--accent-2) 48%, var(--line));
+  color: var(--accent-2);
+  font-weight: 700;
+}
+button.accent:hover {
+  background: color-mix(in srgb, var(--accent-2) 24%, var(--surface-3));
+  border-color: var(--accent-2);
+  color: var(--ink);
+}
 
 /* ----------------------------------------------------------------- Topbar -- */
 .topbar {
@@ -441,6 +452,26 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px 
   animation: spin .8s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ----------------------------------------------------- Guía rápida --------- */
+.guide {
+  position: fixed; inset: 0; z-index: var(--z-overlay);
+  display: flex; align-items: center; justify-content: center; padding: var(--s-5);
+  background: color-mix(in srgb, var(--bg) 78%, transparent); backdrop-filter: blur(4px);
+}
+.guide[hidden] { display: none; }
+.guide-card {
+  position: relative; max-width: 560px; width: 100%;
+  background: var(--surface-2); border: 1px solid var(--line-2); border-radius: var(--r-lg);
+  padding: var(--s-6); box-shadow: var(--shadow-2);
+}
+.guide-card h2 { margin: 0 0 4px; font-size: 20px; letter-spacing: -.01em; }
+.guide-sub { margin: 0 0 var(--s-4); color: var(--muted); font-size: 12.5px; }
+.guide-steps { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: var(--s-3); }
+.guide-steps li { font-size: 13.5px; line-height: 1.5; color: var(--ink-2); }
+.guide-steps b { color: var(--ink); font-weight: 650; }
+.guide-x { position: absolute; top: 12px; right: 12px; padding: 5px 9px; font-size: 12px; }
+.guide-start { width: 100%; margin-top: var(--s-5); padding: 11px; font-size: 14px; }
 
 /* ----------------------------------------------------- Reduced motion ------ */
 @media (prefers-reduced-motion: reduce) {
