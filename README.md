@@ -1,0 +1,73 @@
+# 🎛️ TechnoForge
+
+Tu **asistente de producción de techno** que funciona en el navegador. Genera
+ideas y patrones (bombo, bajo, hats, claps, stabs), los reproduce, los puedes
+editar a mano y exportarlos a **MIDI** (para terminarlos en cualquier DAW) o a
+**WAV** (para escucharlos o compartirlos).
+
+Sin instalar nada, sin cuentas y sin costes.
+
+---
+
+## ▶️ Cómo usarlo (no hace falta saber programar)
+
+1. Descarga este proyecto y haz **doble clic en `index.html`**. Se abre en tu
+   navegador (Chrome, Edge o Firefox). Necesitas conexión a internet la primera
+   vez, porque el motor de audio (Tone.js) se carga desde la web.
+2. Pulsa **🎲 Generar idea**: aparece un patrón de techno completo.
+3. Pulsa **▶ Play** para escucharlo en bucle.
+4. Juega con los controles:
+   - **BPM**: velocidad (el techno suele ir a 125–132).
+   - **Tonalidad** y **Escala**: el "color" del bajo y los acordes (menor =
+     oscuro, frigia = aún más oscuro, dórica = más groovy).
+   - **Energía**: cuánto relleno y densidad tiene el patrón.
+   - **Swing**: ese "balanceo" que hace que no suene tan recto.
+5. **Edita a mano**: pulsa cualquier celda de la rejilla para activar/desactivar
+   un golpe. Cada pista tiene **M** (silenciar) y **🎲** (regenerar solo esa
+   pista sin tocar el resto).
+6. Exporta:
+   - **⬇ MIDI**: te baja un `.mid` con cada instrumento en su propia pista.
+     Lo abres en Ableton / FL Studio / Bitwig y lo terminas con tus sonidos.
+   - **⬇ WAV**: te baja un audio de 4 compases para escuchar o compartir.
+
+> El MIDI es lo más potente: te da la **idea musical** lista para que la
+> conviertas en un temazo en tu DAW con tus propios plugins.
+
+---
+
+## 🧠 Qué hace por dentro (las "reglas" del techno)
+
+- **Bombo**: 4x4 (los cuatro tiempos), el corazón del techno.
+- **Open hats**: en el contratiempo, ese "tss-tss" característico.
+- **Closed hats**: relleno con acentos, según la energía.
+- **Clap**: en los tiempos 2 y 4.
+- **Bajo**: rodante en las semicorcheas que no chocan con el bombo, en la
+  tonalidad elegida, con saltos a la quinta y la octava.
+- **Stabs**: acordes (tríadas de la escala) en posiciones sincopadas.
+- **Sidechain / "pump"**: el bajo y los acordes "respiran" con cada bombo,
+  como en una producción real.
+
+---
+
+## 🗺️ Hoja de ruta
+
+Esto es la **Fase 0 (MVP)**. El plan completo está en
+[`docs/ROADMAP.md`](docs/ROADMAP.md). En resumen:
+
+- **Fase 1** — Arreglo automático (intro / break / drop / outro), variaciones,
+  más motores de síntesis y mejores hats.
+- **Fase 2** — Mezcla y **mastering automático** (lo que más dinero ahorra).
+- **Fase 3** — Generación con IA de verdad (melodías/patrones aprendidos) y
+  separación de stems de canciones existentes.
+
+---
+
+## 🛠️ Detalles técnicos
+
+- 100% web, sin backend: `index.html` + `src/app.js` + `src/midi.js` + `src/styles.css`.
+- Audio y secuenciador: [Tone.js](https://tonejs.github.io/).
+- Exportación MIDI: escritor propio en `src/midi.js` (sin dependencias).
+- Exportación WAV: renderizado offline + codificador PCM 16 bits propio.
+
+Para publicarlo gratis en internet se puede activar **GitHub Pages** sobre este
+repositorio y tendrás una URL para abrirlo desde cualquier sitio.

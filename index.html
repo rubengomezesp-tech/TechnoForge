@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TechnoForge — Generador de ideas de techno</title>
+  <link rel="stylesheet" href="src/styles.css" />
+  <!-- Tone.js: motor de audio (síntesis y secuenciador) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.7.77/Tone.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">◼</span>
+      <h1>TechnoForge</h1>
+      <span class="tag">tu productor de techno en el navegador</span>
+    </div>
+    <div class="transport">
+      <button id="playBtn" class="primary">▶ Play</button>
+      <button id="genBtn">🎲 Generar idea</button>
+      <button id="midiBtn">⬇ MIDI</button>
+      <button id="wavBtn">⬇ WAV</button>
+    </div>
+  </header>
+
+  <section class="controls">
+    <label>BPM
+      <input id="bpm" type="range" min="118" max="140" value="128" />
+      <output id="bpmOut">128</output>
+    </label>
+    <label>Tonalidad
+      <select id="root">
+        <option value="9">A</option>
+        <option value="11">B</option>
+        <option value="0">C</option>
+        <option value="2">D</option>
+        <option value="4">E</option>
+        <option value="5">F</option>
+        <option value="7">G</option>
+      </select>
+    </label>
+    <label>Escala
+      <select id="scale">
+        <option value="minor">Menor (oscuro)</option>
+        <option value="phrygian">Frigia (muy oscuro)</option>
+        <option value="dorian">Dórica (groovy)</option>
+      </select>
+    </label>
+    <label>Energía
+      <input id="energy" type="range" min="0" max="100" value="55" />
+      <output id="energyOut">55</output>
+    </label>
+    <label class="swing">Swing
+      <input id="swing" type="range" min="0" max="60" value="12" />
+      <output id="swingOut">12</output>
+    </label>
+  </section>
+
+  <main id="grid" class="grid"><!-- las pistas se dibujan por JS --></main>
+
+  <footer class="statusbar">
+    <span id="status">Listo. Pulsa <b>Generar idea</b> y luego <b>Play</b>.</span>
+  </footer>
+
+  <script src="src/midi.js"></script>
+  <script src="src/app.js"></script>
+</body>
+</html>
