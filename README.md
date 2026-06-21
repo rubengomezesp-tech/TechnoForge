@@ -54,9 +54,13 @@ dependencias del proyecto):
    solo el bucle de un compás o el **track completo arreglado automáticamente**
    (Intro · Build · Drop · Break · Drop 2 · Outro), con *risers*, *impactos* y
    *fills*. La línea de tiempo de arriba muestra la sección que suena.
-7. **Edita a mano**: pulsa cualquier celda de la rejilla para activar/desactivar
-   un golpe. Cada pista tiene **M** (silenciar) y **🎲** (regenerar solo esa
-   pista sin tocar el resto).
+7. **Edita y mezcla a mano**: pulsa cualquier celda para activar/desactivar un
+   golpe. Cada pista tiene **S** (solo), **M** (silenciar), un **fader de volumen**,
+   un **paneo** (izquierda/derecha) y **🎲** (regenerar solo esa pista).
+8. **Guarda tu trabajo** (barra *Proyecto*): se **autoguarda** en el navegador (al
+   recargar sigue ahí), y con **💾 Guardar** te bajas un archivo `.tfp` para
+   guardarlo aparte o pasarlo a otro equipo; **📂 Cargar** lo recupera y **✨ Nuevo**
+   empieza de cero.
 8. Exporta:
    - **⬇ MIDI**: te baja un `.mid` con cada instrumento en su propia pista.
      Lo abres en Ableton / FL Studio / Bitwig y lo terminas con tus sonidos.

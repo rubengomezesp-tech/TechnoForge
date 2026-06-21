@@ -60,12 +60,13 @@ const ARRANGEMENT = [
 
 let pattern;                  // el bucle base (el "drop") — inicializado abajo,
                               // tras definir arr16/blankPattern (evita TDZ al cargar)
-let mutes = new Set();
 let mode = "loop";            // "loop" | "song"
 let built = null;             // { song, sections, fx } cuando hay track montado
 let currentStep = -1;
 let seq = null;
 let live = null;
+let mix = defaultMix();       // mezclador por pista: { vol(dB), pan(-1..1), mute, solo }
+let projectName = "Mi track";
 
 const $ = (id) => document.getElementById(id);
 const rnd = Math.random;
@@ -78,6 +79,122 @@ function blankPattern() {
 }
 
 pattern = blankPattern(); // ya con arr16 inicializado
+
+// ----------------------------------------------------------------------------
+// Núcleo de estudio: mezclador por pista + proyecto (guardar/cargar/autosave)
+// ----------------------------------------------------------------------------
+function defaultMix() {
+  const m = {};
+  for (const t of TRACKS) m[t.id] = { vol: 0, pan: 0, mute: false, solo: false };
+  return m;
+}
+function mixOf(id) { return mix[id] || { vol: 0, pan: 0, mute: false, solo: false }; }
+function anySolo() { return TRACKS.some((t) => mixOf(t.id).solo); }
+function normalizeMix(src) {
+  const m = defaultMix();
+  if (src) for (const t of TRACKS) if (src[t.id]) Object.assign(m[t.id], src[t.id]);
+  return m;
+}
+
+// Aplica la mezcla a las voces en vivo sin reconstruirlas (mezcla en tiempo real)
+function applyChannel(id) {
+  if (!live || !live.ch || !live.ch[id]) return;
+  const m = mixOf(id), c = live.ch[id];
+  c.volume.value = m.vol;
+  c.pan.value = m.pan;
+  c.mute = m.mute || (anySolo() && !m.solo);
+}
+function applyAllChannels() { if (live && live.ch) for (const t of TRACKS) applyChannel(t.id); }
+
+function setVol(id, v)   { mixOf(id).vol = v; applyChannel(id); markDirty(); }
+function setPan(id, v)   { mixOf(id).pan = v; applyChannel(id); markDirty(); }
+function toggleMute(id)  { const m = mixOf(id); m.mute = !m.mute; applyChannel(id); renderGrid(); markDirty(); }
+function toggleSolo(id)  { const m = mixOf(id); m.solo = !m.solo; applyAllChannels(); renderGrid(); markDirty(); }
+
+// --- Proyecto (.tfp = JSON): el proyecto es la fuente de verdad ---
+const PROJECT_VERSION = 1;
+const AUTOSAVE_KEY = "technoforge.autosave";
+
+function getProject() {
+  return {
+    v: PROJECT_VERSION,
+    name: projectName,
+    mode,
+    ui: {
+      bpm: $("bpm").value, root: $("root").value, scale: $("scale").value,
+      style: $("style").value, emotion: $("emotion").value,
+      energy: $("energy").value, swing: $("swing").value,
+    },
+    pattern,
+    mix,
+  };
+}
+
+function normalizePattern(src) {
+  const p = blankPattern();
+  if (!src) return p;
+  for (const k of ["kick", "clap", "chat", "ohat"])
+    if (Array.isArray(src[k])) for (let i = 0; i < STEPS; i++) p[k][i] = !!src[k][i];
+  if (Array.isArray(src.bass)) for (let i = 0; i < STEPS; i++) p.bass[i] = src.bass[i] == null ? null : src.bass[i];
+  if (Array.isArray(src.stab)) for (let i = 0; i < STEPS; i++) p.stab[i] = Array.isArray(src.stab[i]) ? src.stab[i].slice() : null;
+  return p;
+}
+
+function loadProject(p) {
+  if (!p || !p.ui) return false;
+  projectName = p.name || "Mi track";
+  const set = (id, v) => {
+    const el = $(id); if (el == null || v == null) return;
+    el.value = v; const out = $(id + "Out"); if (out) out.textContent = v;
+  };
+  ["bpm", "root", "scale", "style", "emotion", "energy", "swing"].forEach((id) => set(id, p.ui[id]));
+  pattern = normalizePattern(p.pattern);
+  mix = normalizeMix(p.mix);
+  mode = p.mode === "song" ? "song" : "loop";
+  $("modeBtn").textContent = mode === "song" ? "🎚️ Track" : "🔁 Bucle";
+  if ($("projName")) $("projName").value = projectName;
+  built = null; live = null; // reconstruir voces con la mezcla nueva
+  if (window.Tone && Tone.Transport) Tone.Transport.bpm.value = bpm();
+  refreshSong(); renderGrid(); renderTimeline();
+  return true;
+}
+
+let autosaveT = null;
+function markDirty() {
+  clearTimeout(autosaveT);
+  autosaveT = setTimeout(() => {
+    try { localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(getProject())); } catch (e) {}
+  }, 400);
+}
+
+function saveProjectFile() {
+  const name = (projectName || "track").replace(/[^\w\- ]+/g, "").trim() || "track";
+  const data = new TextEncoder().encode(JSON.stringify(getProject(), null, 2));
+  TechnoMidi.download(data, `${name}.tfp`, "application/json");
+  setStatus("Proyecto guardado (.tfp) ✔");
+}
+
+function loadProjectFile(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      if (loadProject(JSON.parse(reader.result))) {
+        markDirty();
+        setStatus(`Proyecto «${projectName}» cargado ✔`);
+      } else setStatus("Ese archivo no parece un proyecto válido.");
+    } catch (e) { setStatus("No se pudo leer el proyecto (¿archivo dañado?)."); }
+  };
+  reader.readAsText(file);
+}
+
+function newProject() {
+  projectName = "Mi track";
+  mix = defaultMix();
+  if ($("projName")) $("projName").value = projectName;
+  generate(); // patrón nuevo
+  markDirty();
+  setStatus("Proyecto nuevo. <b>Generar idea</b> y <b>Play</b>.");
+}
 
 function rootPc()  { return parseInt($("root").value, 10); }
 function scaleId() { return $("scale").value; }
@@ -174,6 +291,7 @@ function generate() {
   setStatus(mode === "song"
     ? "Track montado. Pulsa <b>Play</b> para escucharlo entero."
     : "Idea generada. <b>Play</b> para escuchar; toca las celdas para editar.");
+  markDirty();
 }
 
 function shuffle(a) {
@@ -296,22 +414,34 @@ function buildVoices(opts = {}) {
   const drumBus = new Tone.Gain(1).connect(master);
   const musicalBus = new Tone.Gain(1).connect(master); // recibe el "pump"
 
+  // Tira de canal por pista (mezclador): volumen/pan/mute/solo. En stems (flatMix)
+  // no se aplica mute/solo, para que cada pista aislada se renderice siempre.
+  const solo = anySolo();
+  const ch = {};
+  for (const t of TRACKS) {
+    const m = mixOf(t.id);
+    const c = new Tone.Channel({ volume: m.vol, pan: m.pan });
+    c.mute = opts.flatMix ? false : (m.mute || (solo && !m.solo));
+    c.connect(t.type === "drum" ? drumBus : musicalBus);
+    ch[t.id] = c;
+  }
+
   const kick = new Tone.MembraneSynth({
     pitchDecay: 0.03, octaves: 6, oscillator: { type: "sine" },
     envelope: { attack: 0.001, decay: 0.34, sustain: 0, release: 0.02 },
-  }).connect(drumBus);
+  }).connect(ch.kick);
 
-  const clapFilter = new Tone.Filter(1400, "bandpass").connect(drumBus);
+  const clapFilter = new Tone.Filter(1400, "bandpass").connect(ch.clap);
   const clap = new Tone.NoiseSynth({
     noise: { type: "white" }, envelope: { attack: 0.002, decay: 0.18, sustain: 0 },
   }).connect(clapFilter);
 
-  const chatFilter = new Tone.Filter(8000, "highpass").connect(drumBus);
+  const chatFilter = new Tone.Filter(8000, "highpass").connect(ch.chat);
   const chat = new Tone.NoiseSynth({
     noise: { type: "white" }, volume: -8, envelope: { attack: 0.001, decay: 0.03, sustain: 0 },
   }).connect(chatFilter);
 
-  const ohatFilter = new Tone.Filter(7000, "highpass").connect(drumBus);
+  const ohatFilter = new Tone.Filter(7000, "highpass").connect(ch.ohat);
   const ohat = new Tone.NoiseSynth({
     noise: { type: "white" }, volume: -10, envelope: { attack: 0.001, decay: 0.2, sustain: 0 },
   }).connect(ohatFilter);
@@ -323,11 +453,11 @@ function buildVoices(opts = {}) {
     volume: -6, filter: { type: "lowpass", Q: 2 },
     filterEnvelope: { attack: 0.005, decay: 0.12, sustain: 0.2, release: 0.1, baseFrequency: 90, octaves: 2.6 },
     envelope: { attack: 0.005, decay: 0.2, sustain: 0.45, release: 0.12 },
-  }).connect(musicalBus);
+  }).connect(ch.bass);
 
   // Acordes con reverb (Freeverb es algorítmico: válido también en render offline)
   // para ese aire cinematográfico de melodic/progressive.
-  const stabVerb = new Tone.Freeverb({ roomSize: 0.62, dampening: 3000 }).connect(musicalBus);
+  const stabVerb = new Tone.Freeverb({ roomSize: 0.62, dampening: 3000 }).connect(ch.stab);
   stabVerb.wet.value = 0.28;
   const stabFilter = new Tone.Filter(2200, "lowpass").connect(stabVerb);
   const stab = new Tone.PolySynth(Tone.Synth, {
@@ -355,6 +485,7 @@ function buildVoices(opts = {}) {
   const midi = (m) => Tone.Frequency(m, "midi").toFrequency();
 
   return {
+    ch, // tiras de canal del mezclador (para ajustes en vivo)
     kick: (t) => kick.triggerAttackRelease("C1", "8n", t),
     clap: (t) => { // dos golpes muy juntos = clap con más cuerpo
       clap.triggerAttackRelease("16n", t, 0.9);
@@ -389,16 +520,16 @@ function buildVoices(opts = {}) {
 // El "pump" (sidechain) se dispara siempre con el bombo, aunque el bombo esté
 // excluido, para que el stem de bajo/acordes conserve su respiración.
 function triggerStep(v, p, s, time, inc = () => true) {
-  if (p.kick[s] && inc("kick") && !mutes.has("kick")) v.kick(time);
+  if (p.kick[s] && inc("kick")) v.kick(time);
   if (p.kick[s]) v.pump(time);
-  if (p.clap[s] && inc("clap") && !mutes.has("clap")) v.clap(time);
-  if (p.chat[s] && inc("chat") && !mutes.has("chat")) {
+  if (p.clap[s] && inc("clap")) v.clap(time);
+  if (p.chat[s] && inc("chat")) {
     const vel = (s % 4 === 0 ? 0.95 : 0.6) + rnd() * 0.1; // humanización
     v.chat(time, clamp(vel, 0, 1));
   }
-  if (p.ohat[s] && inc("ohat") && !mutes.has("ohat")) v.ohat(time);
-  if (p.bass[s] != null && inc("bass") && !mutes.has("bass")) v.bass(time, p.bass[s]);
-  if (p.stab[s] != null && inc("stab") && !mutes.has("stab")) v.stab(time, p.stab[s]);
+  if (p.ohat[s] && inc("ohat")) v.ohat(time);
+  if (p.bass[s] != null && inc("bass")) v.bass(time, p.bass[s]);
+  if (p.stab[s] != null && inc("stab")) v.stab(time, p.stab[s]);
 }
 
 // ----------------------------------------------------------------------------
@@ -454,6 +585,7 @@ function toggleMode() {
     ? "Modo <b>Track completo</b>: Intro · Build · Drop · Break · Drop 2 · Outro."
     : "Modo <b>Bucle</b>: un compás que se repite.");
   if (wasPlaying) play();
+  markDirty();
 }
 
 // ----------------------------------------------------------------------------
@@ -517,13 +649,13 @@ async function exportStems() {
   const n = () => String(files.length + 1).padStart(2, "0");
 
   for (const t of TRACKS) {
-    const buf = await renderOffline(p, null, (id) => id === t.id, { bypassMaster: true });
+    const buf = await renderOffline(p, null, (id) => id === t.id, { bypassMaster: true, flatMix: true });
     files.push({ name: `${n()}-${t.id}.wav`, data: encodeWav(buf.get()) });
     setStatus(`Stem ${t.name} listo ✔`);
   }
   // Stem aparte con los FX del arreglo (risers/impactos), solo en modo Track.
   if (fx && fx.length) {
-    const buf = await renderOffline(p, fx, () => false, { bypassMaster: true });
+    const buf = await renderOffline(p, fx, () => false, { bypassMaster: true, flatMix: true });
     files.push({ name: `${n()}-fx.wav`, data: encodeWav(buf.get()) });
   }
 
@@ -580,14 +712,37 @@ function renderGrid() {
     const head = document.createElement("div");
     head.className = "track-head";
     head.innerHTML = `<span class="name">${t.name}</span>`;
-    const m = document.createElement("button");
-    m.className = "mini" + (mutes.has(t.id) ? " muted" : "");
-    m.textContent = "M"; m.title = "Silenciar";
-    m.onclick = () => { mutes.has(t.id) ? mutes.delete(t.id) : mutes.add(t.id); renderGrid(); };
+
+    const mx = mixOf(t.id);
+    const solo = anySolo();
+
+    const sBtn = document.createElement("button");
+    sBtn.className = "mini" + (mx.solo ? " solo" : "");
+    sBtn.textContent = "S"; sBtn.title = "Solo";
+    sBtn.onclick = () => toggleSolo(t.id);
+
+    const mBtn = document.createElement("button");
+    mBtn.className = "mini" + ((mx.mute || (solo && !mx.solo)) ? " muted" : "");
+    mBtn.textContent = "M"; mBtn.title = "Silenciar";
+    mBtn.onclick = () => toggleMute(t.id);
+
+    const vol = document.createElement("input");
+    vol.type = "range"; vol.className = "mix-vol";
+    vol.min = "-36"; vol.max = "6"; vol.step = "1"; vol.value = mx.vol;
+    vol.title = "Volumen (dB)";
+    vol.oninput = () => setVol(t.id, parseFloat(vol.value));
+
+    const pan = document.createElement("input");
+    pan.type = "range"; pan.className = "mix-pan";
+    pan.min = "-1"; pan.max = "1"; pan.step = "0.1"; pan.value = mx.pan;
+    pan.title = "Paneo (izquierda/derecha)";
+    pan.oninput = () => setPan(t.id, parseFloat(pan.value));
+
     const r = document.createElement("button");
     r.className = "mini"; r.textContent = "🎲"; r.title = "Regenerar esta pista";
     r.onclick = () => regenTrack(t.id);
-    head.append(m, r);
+
+    head.append(sBtn, mBtn, vol, pan, r);
 
     const steps = document.createElement("div");
     steps.className = "steps";
@@ -612,6 +767,7 @@ function toggleCell(t, s) {
   built = null;
   refreshSong();
   renderGrid();
+  markDirty();
 }
 
 function renderTimeline() {
@@ -654,6 +810,13 @@ function init() {
   $("wavBtn").onclick = exportWav;
   $("stemsBtn").onclick = exportStems;
 
+  // Proyecto: nombre, guardar (.tfp), cargar, nuevo
+  $("projName").oninput = () => { projectName = $("projName").value || "Mi track"; markDirty(); };
+  $("saveBtn").onclick = saveProjectFile;
+  $("newBtn").onclick = newProject;
+  $("loadBtn").onclick = () => $("loadInput").click();
+  $("loadInput").onchange = (e) => { if (e.target.files[0]) loadProjectFile(e.target.files[0]); e.target.value = ""; };
+
   // La emoción fija escala + energía sugeridas y regenera (Motor de Armonía Emocional)
   $("emotion").onchange = () => {
     const em = currentEmotion();
@@ -674,11 +837,24 @@ function init() {
       if (out) out.textContent = el.value;
       if (id === "bpm") Tone.Transport.bpm.value = bpm();
       if (id === "swing") Tone.Transport.swing = swingAmt();
+      markDirty();
     };
   };
   ["bpm", "energy", "swing"].forEach(bindRange);
 
-  generate();
+  // Restaura el último proyecto (autoguardado) o genera uno nuevo
+  let restored = false;
+  try {
+    const saved = localStorage.getItem(AUTOSAVE_KEY);
+    if (saved) restored = loadProject(JSON.parse(saved));
+  } catch (e) {}
+  if (restored) {
+    $("projName").value = projectName;
+    setStatus(`Proyecto «${projectName}» restaurado. <b>Play</b> para escuchar.`);
+  } else {
+    $("scale").value = currentEmotion().scale;
+    generate();
+  }
 }
 
 window.addEventListener("DOMContentLoaded", init);

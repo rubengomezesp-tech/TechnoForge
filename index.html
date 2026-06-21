@@ -25,6 +25,16 @@
     </div>
   </header>
 
+  <section class="projectbar">
+    <span class="pb-label">Proyecto</span>
+    <input id="projName" type="text" value="Mi track" maxlength="60" />
+    <button id="saveBtn">💾 Guardar</button>
+    <button id="loadBtn">📂 Cargar</button>
+    <button id="newBtn">✨ Nuevo</button>
+    <input id="loadInput" type="file" accept=".tfp,application/json" hidden />
+    <span class="pb-hint">se autoguarda en este navegador</span>
+  </section>
+
   <section class="controls">
     <label>BPM
       <input id="bpm" type="range" min="118" max="140" value="128" />

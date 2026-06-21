@@ -100,9 +100,35 @@ button.primary.playing { background: var(--accent-2); border-color: var(--accent
 
 .grid { padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; }
 
+/* Barra de proyecto (guardar/cargar/nuevo) */
+.projectbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 20px;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+.projectbar .pb-label {
+  font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted);
+}
+.projectbar input[type="text"] {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 13px;
+  min-width: 180px;
+}
+.projectbar input[type="text"]:focus { outline: none; border-color: var(--accent); }
+.projectbar button { padding: 7px 12px; font-size: 12px; }
+.projectbar .pb-hint { color: var(--muted); font-size: 11px; margin-left: auto; }
+
 .track {
   display: grid;
-  grid-template-columns: 150px 1fr;
+  grid-template-columns: 250px 1fr;
   align-items: center;
   gap: 12px;
   background: var(--panel);
@@ -111,17 +137,22 @@ button.primary.playing { background: var(--accent-2); border-color: var(--accent
   padding: 10px 12px;
 }
 
-.track-head { display: flex; align-items: center; gap: 8px; }
-.track-head .name { font-weight: 600; font-size: 13px; min-width: 56px; }
+.track-head { display: flex; align-items: center; gap: 6px; }
+.track-head .name { font-weight: 600; font-size: 13px; min-width: 44px; }
 .track-head .mini {
   background: var(--panel-2);
   border: 1px solid var(--line);
   border-radius: 6px;
-  padding: 4px 7px;
+  padding: 4px 6px;
   font-size: 11px;
   cursor: pointer;
 }
 .track-head .mini.muted { opacity: .4; }
+.track-head .mini.solo { background: var(--accent-2); border-color: var(--accent-2); color: #04221c; font-weight: 700; }
+
+/* Faders del mezclador por pista */
+.track-head .mix-vol { width: 56px; accent-color: var(--accent); }
+.track-head .mix-pan { width: 40px; accent-color: var(--accent-2); }
 
 .steps { display: grid; grid-template-columns: repeat(16, 1fr); gap: 4px; }
 .step {

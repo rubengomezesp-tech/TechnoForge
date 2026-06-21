@@ -43,6 +43,19 @@ masterizar con asistencia, y dejar el toque final al productor.
 - 🔜 Editor de **Arco Emocional** (curva de tensión que gobierna el arreglo).
 - Plan completo en [`VISION.md`](VISION.md).
 
+## 🏗️ Núcleo de estudio — la plataforma (DIRECCIÓN ACTUAL)
+
+> Objetivo corregido (2026-06-21): **plataforma completa de producción** que
+> reemplaza el stack de pago profesional. Ver `VISION.md`. Esto es la base sobre
+> la que enchufan sampler, sintes, FX y mastering.
+
+- ✅ **Modelo de proyecto** (`.tfp` JSON, fuente de verdad) + **guardar/cargar** +
+  **autoguardado** en el navegador (deja de perderse al recargar).
+- ✅ **Mezclador por pista**: volumen (dB), paneo, mute y **solo** (tiras de canal
+  Tone.Channel), con ajuste en tiempo real; respetado en export WAV.
+- 🔜 Timeline de **clips** multipista (varios patrones encadenados, no 1 compás).
+- 🔜 EQ/compresor por canal y envíos a FX (reverb/delay) compartidos.
+
 ## 🎚️ Fase 2 — Mezcla y mastering (en marcha)
 
 - ✅ **Cadena de máster básica**: EQ (limpia graves / da aire) → glue compressor
