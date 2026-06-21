@@ -333,7 +333,7 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px 
 .strip {
   display: flex; flex-direction: column; align-items: center; gap: 6px;
   background: var(--surface-1); border: 1px solid var(--line); border-radius: var(--r-lg);
-  padding: var(--s-3) var(--s-2); min-width: 120px;
+  padding: var(--s-3) var(--s-2); min-width: 86px; cursor: default;
 }
 .strip-master { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); background: color-mix(in srgb, var(--accent-soft) 50%, var(--surface-1)); }
 .strip-name { font-weight: 700; font-size: 12px; }
@@ -373,29 +373,28 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px 
 }
 .strip-master .strip-db { color: var(--ink); font-weight: 700; }
 
-/* Rack de FX dentro del strip — grid de KNOBS giratorios */
-.strip-fx { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px 4px; width: 100%; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); justify-items: center; }
+/* Tira seleccionada (resaltada) */
+.strip.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.strip.selected .strip-name { color: var(--accent); }
 
-/* Knob giratorio (look de estudio pro) */
-.knob { display: flex; flex-direction: column; align-items: center; gap: 3px; }
-.knob-dial {
-  position: relative; width: 26px; height: 26px; border-radius: 50%;
-  background: radial-gradient(circle at 50% 38%, var(--surface-4), var(--surface-3) 70%, #0d0f14);
-  border: 1px solid var(--line-2); box-shadow: inset 0 1px 2px rgba(0,0,0,.5), 0 1px 1px rgba(0,0,0,.4);
-  cursor: ns-resize; touch-action: none;
-}
-.knob-dial:hover { border-color: var(--accent); }
-.knob-dial:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-.knob-ind {
-  position: absolute; left: 50%; top: 3px; width: 2px; height: 9px; border-radius: 1px;
-  background: var(--accent); transform-origin: 50% 10px; transform: translateX(-50%);
-}
-.knob-lab { font-size: 8.5px; letter-spacing: .02em; color: var(--muted); text-transform: uppercase; }
+/* Slider con valor (preciso y fácil) — usado en panel de canal e instrumentos */
+.ctl { display: flex; flex-direction: column; gap: 3px; }
+.ctl-top { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; }
+.ctl-lab { font-size: 11px; color: var(--ink-2); }
+.ctl-val { font-size: 11px; color: var(--accent-2); font-variant-numeric: tabular-nums; font-weight: 600; }
+.ctl input[type="range"] { width: 100%; }
 
-/* Knobs en los paneles de Instrumentos */
-.instr-knobs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px 8px; margin-top: 10px; justify-items: center; }
-.instr-knobs .knob-dial { width: 34px; height: 34px; }
-.instr-knobs .knob-ind { height: 11px; transform-origin: 50% 14px; top: 4px; }
+/* Panel "Efectos del canal seleccionado" */
+.chanfx { padding: var(--s-2) var(--s-5) var(--s-5); }
+.chanfx-head { font-size: 12px; color: var(--muted); margin-bottom: var(--s-3); text-transform: uppercase; letter-spacing: .06em; }
+.chanfx-head b { color: var(--ink); }
+.chanfx-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--s-3) var(--s-5);
+  background: var(--surface-1); border: 1px solid var(--line); border-radius: var(--r-lg); padding: var(--s-4);
+}
+
+/* Instrumentos: sliders con valor en rejilla */
+.instr-knobs { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--s-3) var(--s-4); margin-top: 10px; }
 
 /* ---------------------------------------------------------------- Estado --- */
 .statusbar {

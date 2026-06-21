@@ -78,6 +78,7 @@ let samples = {};             // sampler: { trackId: {name, url(dataURL)} } pers
 let sampleBuffers = {};       // { trackId: Tone.ToneAudioBuffer } en memoria (decodificado)
 let sampleTarget = null;      // pista destino del próximo archivo cargado
 let editMode = "notes";       // "notes" | "prob" | "ratchet" — qué edita el clic en celda
+let selectedChannel = "kick"; // canal cuyo rack de FX se edita en el panel
 let vocal = { name: null, url: null, bars: 4, vol: 0, mute: false }; // pista de vocal/loop
 let vocalBuffer = null;       // Tone.ToneAudioBuffer de la vocal (en memoria)
 const SAMPLEABLE = ["kick", "clap", "chat", "ohat"]; // pistas de batería (one-shots)
@@ -1514,33 +1515,32 @@ function renderGrid() {
 // --- Mezclador (zona propia, con channel strips estilo estudio) ---
 function fmtDb(v) { return (v > 0 ? "+" : "") + v + " dB"; }
 
-// Knob giratorio reutilizable (look de estudio pro). Arrastra vertical para girar;
-// doble clic = valor por defecto. Misma lógica que un slider, con cara de "aparato".
-function knob(value, min, max, step, onChange, opts) {
-  opts = opts || {};
-  const wrap = document.createElement("div"); wrap.className = "knob"; if (opts.title) wrap.title = opts.title;
-  const dial = document.createElement("div"); dial.className = "knob-dial"; dial.tabIndex = 0;
-  const ind = document.createElement("div"); ind.className = "knob-ind"; dial.appendChild(ind);
-  const lab = document.createElement("div"); lab.className = "knob-lab"; lab.textContent = opts.label || "";
-  let v = value;
-  const render = () => { ind.style.transform = `translateX(-50%) rotate(${-135 + ((v - min) / (max - min)) * 270}deg)`; };
-  const setV = (nv) => { v = Math.max(min, Math.min(max, Math.round(nv / step) * step)); render(); onChange(v); };
-  render();
-  let startY = 0, startV = 0, dragging = false;
-  dial.addEventListener("pointerdown", (e) => { e.preventDefault(); dragging = true; startY = e.clientY; startV = v; dial.setPointerCapture(e.pointerId); });
-  dial.addEventListener("pointermove", (e) => { if (dragging) setV(startV + ((startY - e.clientY) / 130) * (max - min)); });
-  dial.addEventListener("pointerup", (e) => { dragging = false; try { dial.releasePointerCapture(e.pointerId); } catch (_) {} });
-  dial.addEventListener("dblclick", () => { if (opts.def != null) setV(opts.def); });
-  dial.addEventListener("wheel", (e) => { e.preventDefault(); setV(v + (e.deltaY < 0 ? step : -step)); }, { passive: false });
-  wrap.append(dial, lab);
-  return wrap;
-}
 
+// Slider con etiqueta y VALOR numérico (preciso y fácil en desktop)
+function ctlSlider(label, value, min, max, step, onChange, fmt) {
+  fmt = fmt || ((v) => v);
+  const row = document.createElement("div"); row.className = "ctl";
+  const top = document.createElement("div"); top.className = "ctl-top";
+  const lab = document.createElement("span"); lab.className = "ctl-lab"; lab.textContent = label;
+  const val = document.createElement("span"); val.className = "ctl-val"; val.textContent = fmt(value);
+  top.append(lab, val);
+  const inp = document.createElement("input"); inp.type = "range"; inp.min = min; inp.max = max; inp.step = step; inp.value = value;
+  inp.oninput = () => { const v = parseFloat(inp.value); val.textContent = fmt(v); onChange(v); };
+  row.append(top, inp);
+  return row;
+}
+const fmtPct = (v) => Math.round(v * 100) + "%";
+const fmtDb2 = (v) => (v > 0 ? "+" : "") + v + " dB";
+
+// Tira de canal COMPACTA (fader/meter/pan/S/M). Clic en el nombre = seleccionar
+// para editar sus efectos en el panel "Efectos del canal" (menos saturación).
 function channelStrip(id, name, m, solo) {
   const strip = document.createElement("div");
-  strip.className = "strip";
+  strip.className = "strip" + (id === selectedChannel ? " selected" : "");
 
   const nm = document.createElement("div"); nm.className = "strip-name"; nm.textContent = name;
+  nm.title = "Clic para editar sus efectos abajo"; nm.style.cursor = "pointer";
+  nm.onclick = () => selectChannel(id);
 
   const body = document.createElement("div"); body.className = "strip-body";
   const meter = document.createElement("div"); meter.className = "meter";
@@ -1564,25 +1564,25 @@ function channelStrip(id, name, m, solo) {
   const mu = document.createElement("button"); mu.className = "mini" + ((m.mute || (solo && !m.solo)) ? " muted" : ""); mu.textContent = "M"; mu.title = "Silenciar"; mu.onclick = () => toggleMute(id);
   btns.append(s, mu);
 
-  // EQ de 3 bandas por canal + Rack de FX, con KNOBS giratorios (look pro)
-  const rack = document.createElement("div"); rack.className = "strip-fx";
-  const fxKnob = (key, label, title, mn = 0, mx = 1, st = 0.05, def = 0) =>
-    knob(m[key], mn, mx, st, (v) => { m[key] = v; applyFx(id); }, { label, title, def });
-  rack.append(
-    fxKnob("low", "LO", "EQ graves (dB)", -12, 12, 1, 0),
-    fxKnob("mid", "MID", "EQ medios (dB)", -12, 12, 1, 0),
-    fxKnob("high", "HI", "EQ agudos (dB)", -12, 12, 1, 0),
-    fxKnob("comp", "CMP", "Compresor (pegada)", 0, 1, 0.05, 0),
-    fxKnob("drive", "DRV", "Saturación / distorsión", 0, 1, 0.05, 0),
-    fxKnob("crush", "CRU", "Bitcrusher (lo-fi)", 0, 1, 0.05, 0),
-    fxKnob("width", "WID", "Anchura estéreo", 0, 1, 0.05, 0.5),
-    fxKnob("sidechain", "SC", "Sidechain: baja con el kick", 0, 1, 0.05, 0),
-    fxKnob("rev", "REV", "Envío a reverb espacial", 0, 1, 0.05, 0),
-    fxKnob("delay", "DLY", "Envío a delay ping-pong", 0, 1, 0.05, 0),
-  );
-
-  strip.append(nm, body, dbOut, pan, panLbl, btns, rack);
+  strip.append(nm, body, dbOut, pan, panLbl, btns);
   return strip;
+}
+
+function selectChannel(id) { selectedChannel = id; renderMixer(); }
+
+// Panel de efectos del canal seleccionado: sliders precisos con su valor
+function renderChannelFx() {
+  const el = $("chanfx"); if (!el) return;
+  el.innerHTML = "";
+  const id = selectedChannel, t = TRACKS.find((x) => x.id === id), m = mixOf(id);
+  const head = document.createElement("div"); head.className = "chanfx-head"; head.innerHTML = `Efectos · <b>${t ? t.name : id}</b>`;
+  const grid = document.createElement("div"); grid.className = "chanfx-grid";
+  const add = (key, label, mn, mx, st, fmt) => grid.appendChild(ctlSlider(label, m[key], mn, mx, st, (v) => { m[key] = v; applyFx(id); }, fmt));
+  add("low", "EQ Graves", -12, 12, 1, fmtDb2); add("mid", "EQ Medios", -12, 12, 1, fmtDb2); add("high", "EQ Agudos", -12, 12, 1, fmtDb2);
+  add("comp", "Compresor", 0, 1, 0.05, fmtPct); add("drive", "Saturación", 0, 1, 0.05, fmtPct); add("crush", "Bitcrush", 0, 1, 0.05, fmtPct);
+  add("width", "Ancho estéreo", 0, 1, 0.05, fmtPct); add("sidechain", "Sidechain", 0, 1, 0.05, fmtPct);
+  add("rev", "Reverb (envío)", 0, 1, 0.05, fmtPct); add("delay", "Delay (envío)", 0, 1, 0.05, fmtPct);
+  el.append(head, grid);
 }
 
 function renderMixer() {
@@ -1624,6 +1624,7 @@ function renderMixer() {
 
   master.append(nm, body, lufs, gain, gainLbl, tgt, btns);
   mx.appendChild(master);
+  renderChannelFx(); // panel de FX del canal seleccionado
 }
 
 // Medidores: animación continua; solo se mueven con audio sonando
@@ -1706,8 +1707,9 @@ function instrumentPanel(id, label) {
     ctl.append(sp, sel); panel.appendChild(ctl);
   };
   const knobs = document.createElement("div"); knobs.className = "instr-knobs";
+  const fmtFor = (key) => key === "cutoff" ? (v) => Math.round(v) + " Hz" : key === "res" ? (v) => v : key === "fm" ? (v) => v : (v) => v + " s";
   const mkSlider = (key, labelTxt, mn, mx, st) => {
-    knobs.appendChild(knob(p[key], mn, mx, st, (v) => { p[key] = v; applySynth(id); }, { label: labelTxt }));
+    knobs.appendChild(ctlSlider(labelTxt, p[key], mn, mx, st, (v) => { p[key] = v; applySynth(id); }, fmtFor(key)));
   };
 
   // Motor del stab: Saw o FM (cambia el tipo de voz → reconstruye al reproducir)
