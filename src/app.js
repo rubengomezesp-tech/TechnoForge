@@ -68,6 +68,7 @@ let currentStep = -1;
 let seq = null;
 let live = null;
 let mix = defaultMix();       // mezclador por pista: { vol(dB), pan(-1..1), mute, solo }
+let synth = defaultSynths();  // sintes editables (bajo y acordes): onda/filtro/ADSR
 let projectName = "Mi track";
 let samples = {};             // sampler: { trackId: {name, url(dataURL)} } persistente
 let sampleBuffers = {};       // { trackId: Tone.ToneAudioBuffer } en memoria (decodificado)
@@ -100,6 +101,19 @@ function defaultMix() {
   return m;
 }
 function mixOf(id) { return mix[id] || { vol: 0, pan: 0, mute: false, solo: false }; }
+
+// Sintetizadores editables (subtractivo) para las pistas con tono
+function defaultSynths() {
+  return {
+    bass: { wave: "sawtooth", cutoff: 90,   res: 2, attack: 0.005, decay: 0.20, sustain: 0.45, release: 0.12 },
+    stab: { wave: "sawtooth", cutoff: 2200, res: 1, attack: 0.006, decay: 0.22, sustain: 0.05, release: 0.18 },
+  };
+}
+function normalizeSynths(src) {
+  const d = defaultSynths();
+  if (src) for (const id of ["bass", "stab"]) if (src[id]) Object.assign(d[id], src[id]);
+  return d;
+}
 function anySolo() { return TRACKS.some((t) => mixOf(t.id).solo); }
 function normalizeMix(src) {
   const m = defaultMix();
@@ -275,7 +289,7 @@ function selectTramo(i) {
 function addTramo() { // copia el actual para seguir creando rápido una variación
   patterns.splice(current + 1, 0, deepCopy(pattern));
   current += 1; pattern = patterns[current];
-  built = null; refreshSong(); renderGrid(); markDirty();
+  built = null; refreshSong(); renderGrid(); resync(); markDirty();
   setStatus(`<b>Tramo ${current + 1}</b> creado (copia). Edítalo y pulsa ➕ para el siguiente.`);
 }
 function newIdeaTramo() { // tramo nuevo con una idea generada desde cero
@@ -289,7 +303,7 @@ function deleteTramo(i) {
   patterns.splice(i, 1);
   current = Math.max(0, Math.min(current, patterns.length - 1));
   pattern = patterns[current];
-  built = null; refreshSong(); renderGrid(); markDirty();
+  built = null; refreshSong(); renderGrid(); resync(); markDirty();
 }
 
 function renderTramos() {
@@ -567,23 +581,24 @@ function buildVoices(opts = {}) {
     noise: { type: "white" }, volume: -10, envelope: { attack: 0.001, decay: 0.2, sustain: 0 },
   }).connect(ohatFilter);
 
-  // Bajo: "reese" (sierras detunadas) en estilos oscuros, sierra simple en el resto
-  const reese = styleId() === "hypnotic" || styleId() === "industrial";
+  // Bajo: sinte sustractivo editable (onda/filtro/ADSR desde synth.bass)
+  const bs = synth.bass;
   const bass = new Tone.MonoSynth({
-    oscillator: reese ? { type: "fatsawtooth", count: 3, spread: 40 } : { type: "sawtooth" },
-    volume: -6, filter: { type: "lowpass", Q: 2 },
-    filterEnvelope: { attack: 0.005, decay: 0.12, sustain: 0.2, release: 0.1, baseFrequency: 90, octaves: 2.6 },
-    envelope: { attack: 0.005, decay: 0.2, sustain: 0.45, release: 0.12 },
+    oscillator: bs.wave === "fatsawtooth" ? { type: "fatsawtooth", count: 3, spread: 40 } : { type: bs.wave },
+    volume: -6, filter: { type: "lowpass", Q: bs.res },
+    filterEnvelope: { attack: 0.005, decay: 0.12, sustain: 0.2, release: 0.1, baseFrequency: bs.cutoff, octaves: 2.6 },
+    envelope: { attack: bs.attack, decay: bs.decay, sustain: bs.sustain, release: bs.release },
   }).connect(ch.bass);
 
-  // Acordes con reverb (Freeverb es algorítmico: válido también en render offline)
-  // para ese aire cinematográfico de melodic/progressive.
+  // Acordes: sinte editable (synth.stab) + reverb (Freeverb, válido en render offline)
+  const st = synth.stab;
   const stabVerb = new Tone.Freeverb({ roomSize: 0.62, dampening: 3000 }).connect(ch.stab);
   stabVerb.wet.value = 0.28;
-  const stabFilter = new Tone.Filter(2200, "lowpass").connect(stabVerb);
+  const stabFilter = new Tone.Filter(st.cutoff, "lowpass").connect(stabVerb);
+  stabFilter.Q.value = st.res;
   const stab = new Tone.PolySynth(Tone.Synth, {
-    oscillator: { type: "sawtooth" }, volume: -14,
-    envelope: { attack: 0.006, decay: 0.22, sustain: 0.05, release: 0.18 },
+    oscillator: { type: st.wave === "fatsawtooth" ? "fatsawtooth" : st.wave }, volume: -14,
+    envelope: { attack: st.attack, decay: st.decay, sustain: st.sustain, release: st.release },
   }).connect(stabFilter);
 
   // FX (no pasan por el pump): riser e impacto
@@ -659,28 +674,37 @@ function triggerStep(v, p, s, time, inc = () => true) {
 // ----------------------------------------------------------------------------
 // Reproducción en vivo
 // ----------------------------------------------------------------------------
+// Crea la secuencia. La fuente se lee DINÁMICAMENTE en cada paso, así que editar,
+// cambiar de tramo o de modo se oye al instante sin reiniciar.
+function buildSequence() {
+  if (seq) { seq.dispose(); seq = null; }
+  const songMode = mode === "song";
+  if (songMode && !built) built = buildSong();
+  const len = (songMode ? built.song : pattern).kick.length;
+  const fxMap = {};
+  if (songMode && built) built.fx.forEach((e) => (fxMap[e.step] = e.type));
+  const barSec = (60 / bpm()) * 4;
+
+  seq = new Tone.Sequence((time, g) => {
+    const src = (mode === "song") ? (built ? built.song : pattern) : pattern;
+    if (g < src.kick.length) triggerStep(live, src, g, time);
+    if (fxMap[g] === "riser") live.riser(time, barSec);
+    if (fxMap[g] === "downlifter") live.downlifter(time, barSec);
+    if (fxMap[g] === "impact") live.impact(time);
+    Tone.Draw.schedule(() => { highlight(g % STEPS); highlightSection(g); }, time);
+  }, [...Array(len).keys()], "16n").start(0);
+}
+
+// Rehace la secuencia en vivo si cambia su longitud (añadir/borrar tramo, modo)
+function resync() { if (Tone.Transport.state === "started") buildSequence(); }
+
 async function play() {
   await Tone.start();
   Tone.Transport.bpm.value = bpm();
   Tone.Transport.swing = swingAmt();
   Tone.Transport.swingSubdivision = "16n";
   if (!live) live = buildVoices();
-  if (seq) seq.dispose();
-
-  const p = mode === "song" && built ? built.song : pattern;
-  const fxMap = {};
-  if (mode === "song" && built) built.fx.forEach((e) => (fxMap[e.step] = e.type));
-  const len = p.kick.length;
-  const barSec = (60 / bpm()) * 4;
-
-  seq = new Tone.Sequence((time, g) => {
-    triggerStep(live, p, g, time);
-    if (fxMap[g] === "riser") live.riser(time, barSec);
-    if (fxMap[g] === "downlifter") live.downlifter(time, barSec);
-    if (fxMap[g] === "impact") live.impact(time);
-    Tone.Draw.schedule(() => { highlight(g % STEPS); highlightSection(g); }, time);
-  }, [...Array(len).keys()], "16n").start(0);
-
+  buildSequence();
   Tone.Transport.start();
   $("playBtn").classList.add("playing");
   $("playBtn").textContent = "⏸ Stop";
@@ -693,6 +717,7 @@ function stop() {
   $("playBtn").classList.remove("playing");
   $("playBtn").textContent = "▶ Play";
   highlight(-1);
+  document.querySelectorAll("#tramos .tramo.playing").forEach((el) => el.classList.remove("playing"));
   setStatus("Parado. Pulsa <b>Play</b> para seguir.");
 }
 
@@ -974,6 +999,9 @@ function highlightSection(g) {
   const idx = built.sections.findIndex((s) => bar >= s.startBar && bar < s.startBar + s.bars);
   document.querySelectorAll(".timeline .sec").forEach((el) =>
     el.classList.toggle("active", +el.dataset.idx === idx));
+  // Resalta también el chip del tramo que suena (sin cambiar el que editas)
+  document.querySelectorAll("#tramos .tramo").forEach((el, i) =>
+    el.classList.toggle("playing", i === idx));
 }
 
 function highlight(s) {
