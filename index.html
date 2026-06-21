@@ -34,6 +34,7 @@
     <button id="newBtn">✨ Nuevo</button>
     <input id="loadInput" type="file" accept=".tfp,application/json" hidden />
     <input id="sampleInput" type="file" accept="audio/*" hidden />
+    <input id="vocalInput" type="file" accept="audio/*" hidden />
     <span class="pb-hint">se autoguarda en este navegador</span>
   </section>
 
@@ -119,6 +120,7 @@
     <button type="button" class="seg" data-mode="prob">Prob</button>
     <button type="button" class="seg" data-mode="ratchet">Ratchet</button>
   </div>
+  <section id="vocal" class="vocal"><!-- pista de vocal/sample por JS --></section>
   <main id="grid" class="grid"><!-- las pistas se dibujan por JS --></main>
 
   <h2 class="zone-title" data-collapsible data-open="false">Instrumentos</h2>

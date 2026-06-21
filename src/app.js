@@ -75,6 +75,8 @@ let samples = {};             // sampler: { trackId: {name, url(dataURL)} } pers
 let sampleBuffers = {};       // { trackId: Tone.ToneAudioBuffer } en memoria (decodificado)
 let sampleTarget = null;      // pista destino del próximo archivo cargado
 let editMode = "notes";       // "notes" | "prob" | "ratchet" — qué edita el clic en celda
+let vocal = { name: null, url: null, bars: 4, vol: 0, mute: false }; // pista de vocal/loop
+let vocalBuffer = null;       // Tone.ToneAudioBuffer de la vocal (en memoria)
 const SAMPLEABLE = ["kick", "clap", "chat", "ohat"]; // pistas de batería (one-shots)
 
 const $ = (id) => document.getElementById(id);
@@ -320,6 +322,7 @@ function getProject() {
     fxGlobal,
     synth,
     samples,
+    vocal,
   };
 }
 
@@ -370,12 +373,21 @@ function loadProject(p) {
       }
     }
   }
+  // Vocal/Sample: restaura ajustes y re-decodifica el audio
+  vocal = { name: null, url: null, bars: 4, vol: 0, mute: false };
+  vocalBuffer = null;
+  if (p.vocal) {
+    vocal = { name: p.vocal.name || null, url: p.vocal.url || null, bars: p.vocal.bars || 4, vol: p.vocal.vol || 0, mute: !!p.vocal.mute };
+    if (vocal.url && window.Tone) {
+      const tb = new Tone.ToneAudioBuffer(vocal.url, () => { vocalBuffer = tb; live = null; renderVocal(); });
+    }
+  }
   mode = p.mode === "song" ? "song" : "loop";
   $("modeBtn").textContent = mode === "song" ? "🎚️ Track" : "🔁 Bucle";
   if ($("projName")) $("projName").value = projectName;
   built = null; live = null; // reconstruir voces con la mezcla nueva
   if (window.Tone && Tone.Transport) Tone.Transport.bpm.value = bpm();
-  refreshSong(); renderGrid(); renderTimeline(); renderInstruments();
+  refreshSong(); renderGrid(); renderTimeline(); renderInstruments(); renderVocal();
   return true;
 }
 
@@ -387,7 +399,7 @@ function markDirty() {
       localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(getProject()));
     } catch (e) {
       // Si los samples exceden la cuota, guarda al menos el resto (samples van en el .tfp)
-      try { const p = getProject(); p.samples = {}; localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(p)); } catch (e2) {}
+      try { const p = getProject(); p.samples = {}; if (p.vocal) p.vocal = { ...p.vocal, url: null }; localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(p)); } catch (e2) {}
     }
   }, 400);
 }
@@ -420,6 +432,7 @@ function newProject() {
   fxGlobal = { rumble: 0, masterGain: 0, lufsTarget: -9 };
   if ($("rumble")) { $("rumble").value = 0; $("rumbleOut").textContent = "0"; }
   synth = defaultSynths(); renderInstruments();
+  vocal = { name: null, url: null, bars: 4, vol: 0, mute: false }; vocalBuffer = null; renderVocal();
   if ($("projName")) $("projName").value = projectName;
   generate(); // patrón nuevo
   markDirty();
@@ -454,6 +467,66 @@ function clearSample(id) {
   invalidateVoices();
   renderGrid(); markDirty();
   setStatus(`Pista <b>${id}</b> vuelve a la síntesis.`);
+}
+
+// --- Pista de Vocal/Sample: un audio (acapella/loop) sincronizado al tempo ---
+function loadVocalFile(file) {
+  setStatus(`Cargando vocal «${file.name}»…`);
+  const reader = new FileReader();
+  reader.onload = () => {
+    const url = reader.result;
+    const tbuf = new Tone.ToneAudioBuffer(url, () => {
+      vocalBuffer = tbuf;
+      vocal.name = file.name; vocal.url = url;
+      invalidateVoices(); renderVocal(); markDirty();
+      setStatus(`🎤 Vocal «${file.name}» cargada (${vocal.bars} comp.). Pulsa Play.`);
+    }, () => setStatus("No se pudo decodificar esa vocal (prueba .wav o .mp3)."));
+  };
+  reader.readAsDataURL(file);
+}
+function clearVocal() {
+  vocal = { name: null, url: null, bars: vocal.bars, vol: vocal.vol, mute: vocal.mute };
+  vocalBuffer = null;
+  invalidateVoices(); renderVocal(); markDirty();
+  setStatus("Vocal quitada.");
+}
+function setVocal(key, v) { vocal[key] = v; invalidateVoices(); renderVocal(); markDirty(); }
+
+function renderVocal() {
+  const el = $("vocal"); if (!el) return;
+  el.innerHTML = "";
+  const lab = document.createElement("span"); lab.className = "em-label"; lab.textContent = "🎤 Vocal/Sample";
+  el.appendChild(lab);
+  if (!vocal.name) {
+    const btn = document.createElement("button"); btn.className = "tramo-add"; btn.textContent = "＋ Cargar vocal/loop";
+    btn.title = "Carga una acapella, vocal o loop (.wav/.mp3) sincronizado al tempo";
+    btn.onclick = () => $("vocalInput").click();
+    el.appendChild(btn);
+    return;
+  }
+  const name = document.createElement("span"); name.className = "vocal-name"; name.textContent = vocal.name;
+  el.appendChild(name);
+  // compases (longitud del loop)
+  const barsWrap = document.createElement("label"); barsWrap.className = "vocal-ctl";
+  barsWrap.append(Object.assign(document.createElement("span"), { textContent: "Compases" }));
+  const barsSel = document.createElement("select");
+  [1, 2, 4, 8, 16].forEach((n) => { const o = document.createElement("option"); o.value = n; o.textContent = n; if (n === vocal.bars) o.selected = true; barsSel.appendChild(o); });
+  barsSel.onchange = () => setVocal("bars", parseInt(barsSel.value, 10));
+  barsWrap.appendChild(barsSel); el.appendChild(barsWrap);
+  // volumen
+  const volWrap = document.createElement("label"); volWrap.className = "vocal-ctl";
+  volWrap.append(Object.assign(document.createElement("span"), { textContent: "Vol" }));
+  const vol = document.createElement("input"); vol.type = "range"; vol.min = "-36"; vol.max = "6"; vol.step = "1"; vol.value = vocal.vol;
+  vol.oninput = () => setVocal("vol", parseFloat(vol.value));
+  volWrap.appendChild(vol); el.appendChild(volWrap);
+  // mute
+  const mute = document.createElement("button"); mute.className = "mini" + (vocal.mute ? " muted" : ""); mute.textContent = "M"; mute.title = "Silenciar vocal";
+  mute.onclick = () => setVocal("mute", !vocal.mute);
+  el.appendChild(mute);
+  // quitar
+  const x = document.createElement("button"); x.className = "mini"; x.textContent = "✕"; x.title = "Quitar vocal";
+  x.onclick = () => clearVocal();
+  el.appendChild(x);
 }
 
 // --- Tramos (secciones): crea y encadena partes para montar el track ---
@@ -762,6 +835,18 @@ function buildVoices(opts = {}) {
   rumbleSend.connect(rumbleFilter); rumbleFilter.connect(rumbleVerb); rumbleVerb.connect(master);
   fx.kick.scGain.connect(rumbleSend);
 
+  // Pista de Vocal/Sample: loop sincronizado (playbackRate ajusta a N compases)
+  let vocalPlayer = null;
+  if (vocalBuffer && vocalBuffer.loaded) {
+    const barSec = (60 / bpm()) * 4;
+    const vch = new Tone.Channel({ volume: vocal.vol || 0 });
+    vch.mute = opts.flatMix ? false : !!vocal.mute;
+    vch.connect(master);
+    vocalPlayer = new Tone.Player({ url: vocalBuffer, loop: true });
+    vocalPlayer.playbackRate = Math.max(0.05, vocalBuffer.duration / ((vocal.bars || 4) * barSec));
+    vocalPlayer.connect(vch);
+  }
+
   // Sampler: si una pista de batería tiene sample cargado, su reproductor
   // sustituye a la síntesis (suena el audio real en vez del sintetizado).
   const players = {};
@@ -845,6 +930,7 @@ function buildVoices(opts = {}) {
     ch,          // tiras de canal del mezclador (para ajustes en vivo)
     fx,          // rack de FX por canal (drive/sidechain/envíos)
     rumbleSend,  // envío al sub-rumble (techno)
+    vocalPlayer, // reproductor de la pista de vocal/loop
     masterGainNode, // ganancia de máster (mastering/LUFS)
     analyser,    // analizador de espectro (FFT) de la salida
     meters,      // medidores de nivel por pista
@@ -949,6 +1035,7 @@ async function play() {
   Tone.Transport.swingSubdivision = "16n";
   if (!live) live = buildVoices();
   buildSequence();
+  if (live.vocalPlayer && !live._vocalSynced) { live.vocalPlayer.sync().start(0); live._vocalSynced = true; }
   Tone.Transport.start();
   $("playBtn").classList.add("playing");
   $("playBtn").textContent = "⏸ Stop";
@@ -1014,6 +1101,7 @@ async function renderOffline(p, fx, inc, opts) {
 
   return Tone.Offline(() => {
     const v = buildVoices(opts);
+    if (v.vocalPlayer && !opts.flatMix) v.vocalPlayer.start(0); // vocal en el export
     for (let g = 0; g < totalSteps; g++) {
       let t = g * stepDur;
       if (sw && g % 2 === 1) t += stepDur * sw * 0.66;
@@ -1464,6 +1552,7 @@ function init() {
   $("loadBtn").onclick = () => $("loadInput").click();
   $("loadInput").onchange = (e) => { if (e.target.files[0]) loadProjectFile(e.target.files[0]); e.target.value = ""; };
   $("sampleInput").onchange = (e) => { if (e.target.files[0] && sampleTarget) loadSampleFile(e.target.files[0], sampleTarget); e.target.value = ""; };
+  $("vocalInput").onchange = (e) => { if (e.target.files[0]) loadVocalFile(e.target.files[0]); e.target.value = ""; };
 
   // La emoción fija escala + energía sugeridas y regenera (Motor de Armonía Emocional)
   $("emotion").onchange = () => {
@@ -1510,6 +1599,7 @@ function init() {
   meterLoop(); // medidores del mezclador (se mueven al reproducir)
   drawSpectrum(); // analizador de espectro
   renderInstruments();
+  renderVocal();
 
   // Restaura el último proyecto (autoguardado) o genera uno nuevo
   let restored = false;

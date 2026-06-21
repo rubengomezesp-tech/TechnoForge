@@ -241,6 +241,16 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px 
 .editmode .seg { padding: 6px 12px; font-size: 12px; background: var(--surface-3); }
 .editmode .seg.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 650; }
 
+/* ----------------------------------------------------- Pista de Vocal ------ */
+.vocal { display: flex; align-items: center; gap: var(--s-3); padding: var(--s-2) var(--s-5) 0; flex-wrap: wrap; }
+.vocal:empty { display: none; }
+.vocal .vocal-name { font-size: 12px; font-weight: 600; color: var(--accent-2); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vocal .vocal-ctl { display: flex; align-items: center; gap: 6px; font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.vocal .vocal-ctl input[type="range"] { width: 90px; }
+.vocal .vocal-ctl select { background: var(--surface-3); color: var(--ink); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 3px 5px; font: inherit; font-size: 12px; }
+.vocal .mini { background: var(--surface-3); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 4px 8px; font-size: 11px; cursor: pointer; }
+.vocal .mini.muted { opacity: .42; }
+
 /* ------------------------------------------------------------ Secuenciador - */
 .grid { padding: var(--s-4) var(--s-5); display: flex; flex-direction: column; gap: var(--s-2); }
 .track {
