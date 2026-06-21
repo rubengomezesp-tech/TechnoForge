@@ -2021,7 +2021,6 @@ function init() {
   $("guideClose").onclick = hideGuide;
   $("guideStart").onclick = hideGuide;
   $("guide").onclick = (e) => { if (e.target.id === "guide") hideGuide(); };
-  try { if (!localStorage.getItem("technoforge.seenGuide")) showGuide(); } catch (e) {}
   $("loadInput").onchange = (e) => { if (e.target.files[0]) loadProjectFile(e.target.files[0]); e.target.value = ""; };
   $("sampleInput").onchange = (e) => { if (e.target.files[0] && sampleTarget) loadSampleFile(e.target.files[0], sampleTarget); e.target.value = ""; };
   $("vocalInput").onchange = (e) => { if (e.target.files[0]) loadVocalFile(e.target.files[0]); e.target.value = ""; };
