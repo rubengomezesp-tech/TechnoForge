@@ -36,7 +36,7 @@ const STYLE_PARAMS = {
 const ARRANGEMENT = [
   { name: "Intro",  bars: 4, keep: ["kick", "chat", "ohat"] },
   { name: "Build",  bars: 4, keep: ["kick", "chat", "ohat", "bass"], fillLast: true, riserLast: true },
-  { name: "Drop",   bars: 8, keep: "all", impactFirst: true, variant: "A" },
+  { name: "Drop",   bars: 8, keep: "all", impactFirst: true, downlifterLast: true, variant: "A" },
   { name: "Break",  bars: 4, keep: ["chat", "bass", "stab"], riserLast: true, variant: "B" },
   { name: "Drop 2", bars: 8, keep: "all", impactFirst: true, variant: "B" },
   { name: "Outro",  bars: 4, keep: ["kick", "chat"] },
@@ -122,6 +122,9 @@ function generate() {
 
   pattern = p;
   built = null;
+  // Si no está sonando, fuerza recrear las voces (para que el cambio de estilo
+  // — p.ej. el bajo reese — se aplique en la siguiente reproducción).
+  if (Tone.Transport.state !== "started") live = null;
   refreshSong();
   renderGrid();
   setStatus(mode === "song"
@@ -213,8 +216,9 @@ function buildSong() {
     }
 
     sections.push({ name: sec.name, startBar: barCursor, bars: sec.bars });
-    if (sec.impactFirst) fx.push({ step: startStep, type: "impact" });
-    if (sec.riserLast)   fx.push({ step: (barCursor + sec.bars - 1) * STEPS, type: "riser" });
+    if (sec.impactFirst)    fx.push({ step: startStep, type: "impact" });
+    if (sec.riserLast)      fx.push({ step: (barCursor + sec.bars - 1) * STEPS, type: "riser" });
+    if (sec.downlifterLast) fx.push({ step: (barCursor + sec.bars - 1) * STEPS, type: "downlifter" });
     barCursor += sec.bars;
   }
   return { song, sections, fx };
@@ -257,8 +261,11 @@ function buildVoices() {
     noise: { type: "white" }, volume: -10, envelope: { attack: 0.001, decay: 0.2, sustain: 0 },
   }).connect(ohatFilter);
 
+  // Bajo: "reese" (sierras detunadas) en estilos oscuros, sierra simple en el resto
+  const reese = styleId() === "hypnotic" || styleId() === "industrial";
   const bass = new Tone.MonoSynth({
-    oscillator: { type: "sawtooth" }, volume: -6, filter: { type: "lowpass", Q: 2 },
+    oscillator: reese ? { type: "fatsawtooth", count: 3, spread: 40 } : { type: "sawtooth" },
+    volume: -6, filter: { type: "lowpass", Q: 2 },
     filterEnvelope: { attack: 0.005, decay: 0.12, sustain: 0.2, release: 0.1, baseFrequency: 90, octaves: 2.6 },
     envelope: { attack: 0.005, decay: 0.2, sustain: 0.45, release: 0.12 },
   }).connect(musicalBus);
@@ -280,11 +287,20 @@ function buildVoices() {
     noise: { type: "white" }, volume: -6, envelope: { attack: 0.001, decay: 1.1, sustain: 0, release: 0.1 },
   }).connect(impactFilter);
 
+  // Downlifter: barrido descendente para soltar tensión al salir de un drop
+  const downFilter = new Tone.Filter(9000, "lowpass").connect(master);
+  const downNoise = new Tone.NoiseSynth({
+    noise: { type: "pink" }, volume: -16, envelope: { attack: 0.01, decay: 0.01, sustain: 1, release: 0.06 },
+  }).connect(downFilter);
+
   const midi = (m) => Tone.Frequency(m, "midi").toFrequency();
 
   return {
     kick: (t) => kick.triggerAttackRelease("C1", "8n", t),
-    clap: (t) => clap.triggerAttackRelease("16n", t),
+    clap: (t) => { // dos golpes muy juntos = clap con más cuerpo
+      clap.triggerAttackRelease("16n", t, 0.9);
+      clap.triggerAttackRelease("32n", t + 0.012, 0.6);
+    },
     chat: (t, v = 1) => chat.triggerAttackRelease("32n", t, v),
     ohat: (t) => ohat.triggerAttackRelease("16n", t, 0.9),
     bass: (t, m) => bass.triggerAttackRelease(midi(m), "16n", t),
@@ -301,6 +317,12 @@ function buildVoices() {
       riserNoise.triggerAttackRelease(dur, t, 0.5);
     },
     impact: (t) => impact.triggerAttackRelease(1.1, t, 0.8),
+    downlifter: (t, dur) => {
+      downFilter.frequency.cancelScheduledValues(t);
+      downFilter.frequency.setValueAtTime(9000, t);
+      downFilter.frequency.exponentialRampToValueAtTime(300, t + dur);
+      downNoise.triggerAttackRelease(dur, t, 0.4);
+    },
   };
 }
 
@@ -337,6 +359,7 @@ async function play() {
   seq = new Tone.Sequence((time, g) => {
     triggerStep(live, p, g, time);
     if (fxMap[g] === "riser") live.riser(time, barSec);
+    if (fxMap[g] === "downlifter") live.downlifter(time, barSec);
     if (fxMap[g] === "impact") live.impact(time);
     Tone.Draw.schedule(() => { highlight(g % STEPS); highlightSection(g); }, time);
   }, [...Array(len).keys()], "16n").start(0);
@@ -407,7 +430,9 @@ async function exportWav() {
     }
     if (fx) fx.forEach((e) => {
       const t = e.step * stepDur;
-      if (e.type === "riser") v.riser(t, barSec); else v.impact(t);
+      if (e.type === "riser") v.riser(t, barSec);
+      else if (e.type === "downlifter") v.downlifter(t, barSec);
+      else v.impact(t);
     });
   }, seconds);
 
