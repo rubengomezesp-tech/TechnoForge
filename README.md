@@ -22,13 +22,20 @@ Sin instalar nada, sin cuentas y sin costes.
      oscuro, frigia = aún más oscuro, dórica = más groovy).
    - **Energía**: cuánto relleno y densidad tiene el patrón.
    - **Swing**: ese "balanceo" que hace que no suene tan recto.
-5. **Edita a mano**: pulsa cualquier celda de la rejilla para activar/desactivar
+5. **Estilo**: elige Peak-time, Hipnótico, Melódico o Industrial para cambiar el
+   carácter del patrón.
+6. **Modo Track** 🎚️: pulsa **🔁 Bucle / 🎚️ Track** para alternar entre escuchar
+   solo el bucle de un compás o el **track completo arreglado automáticamente**
+   (Intro · Build · Drop · Break · Drop 2 · Outro), con *risers*, *impactos* y
+   *fills*. La línea de tiempo de arriba muestra la sección que suena.
+7. **Edita a mano**: pulsa cualquier celda de la rejilla para activar/desactivar
    un golpe. Cada pista tiene **M** (silenciar) y **🎲** (regenerar solo esa
    pista sin tocar el resto).
-6. Exporta:
+8. Exporta:
    - **⬇ MIDI**: te baja un `.mid` con cada instrumento en su propia pista.
      Lo abres en Ableton / FL Studio / Bitwig y lo terminas con tus sonidos.
-   - **⬇ WAV**: te baja un audio de 4 compases para escuchar o compartir.
+   - **⬇ WAV**: te baja el audio (4 compases en modo Bucle, o el **track entero**
+     en modo Track) para escuchar o compartir.
 
 > El MIDI es lo más potente: te da la **idea musical** lista para que la
 > conviertas en un temazo en tu DAW con tus propios plugins.

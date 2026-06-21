@@ -18,6 +18,7 @@
     <div class="transport">
       <button id="playBtn" class="primary">▶ Play</button>
       <button id="genBtn">🎲 Generar idea</button>
+      <button id="modeBtn">🔁 Bucle</button>
       <button id="midiBtn">⬇ MIDI</button>
       <button id="wavBtn">⬇ WAV</button>
     </div>
@@ -46,6 +47,14 @@
         <option value="dorian">Dórica (groovy)</option>
       </select>
     </label>
+    <label>Estilo
+      <select id="style">
+        <option value="peaktime">Peak-time</option>
+        <option value="hypnotic">Hipnótico</option>
+        <option value="melodic">Melódico</option>
+        <option value="industrial">Industrial</option>
+      </select>
+    </label>
     <label>Energía
       <input id="energy" type="range" min="0" max="100" value="55" />
       <output id="energyOut">55</output>
@@ -55,6 +64,8 @@
       <output id="swingOut">12</output>
     </label>
   </section>
+
+  <section id="timeline" class="timeline"><!-- estructura del track (modo Track) --></section>
 
   <main id="grid" class="grid"><!-- las pistas se dibujan por JS --></main>
 

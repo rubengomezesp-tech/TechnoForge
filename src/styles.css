@@ -82,6 +82,22 @@ button.primary.playing { background: var(--accent-2); border-color: var(--accent
 }
 .controls output { color: var(--text); font-weight: 600; font-size: 13px; }
 
+.timeline { display: flex; gap: 4px; padding: 14px 20px 0; }
+.timeline:empty { display: none; }
+.sec {
+  flex: 1 1 0;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 7px 6px;
+  font-size: 11px;
+  color: var(--muted);
+  text-align: center;
+  transition: all .12s ease;
+}
+.sec.active { border-color: var(--accent); color: var(--text); background: #23262e; }
+.sec .bars { display: block; font-size: 10px; opacity: .6; margin-top: 2px; }
+
 .grid { padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; }
 
 .track {

@@ -19,14 +19,20 @@ masterizar con asistencia, y dejar el toque final al productor.
 - Sidechain (pump) bajo+acordes con el bombo.
 - Exportación **MIDI multipista** y **WAV**.
 
-## 🔜 Fase 1 — Arreglo y sonido
+## ✅ Fase 1 — Arreglo y sonido (hecho)
 
 - **Arreglo automático**: estructura de track (intro · build · drop · break ·
-  outro) generando varios compases, no solo un bucle.
-- **Variaciones**: fills cada 4/8 compases, mutaciones controladas del patrón.
-- **Más motores**: 808/909 emuladas, bajo reese, plucks, FX risers/impactos.
-- **Mejores hats** y velocidad/acentos por paso (humanización).
-- **Presets de estilo**: peak-time, hypnotic, melodic, industrial.
+  drop 2 · outro) generando ~32 compases, no solo un bucle. Modo Bucle/Track.
+- **FX**: *risers* antes de los drops e *impactos* al entrar.
+- **Fills** de hats al final de las secciones de tensión.
+- **Hats humanizados** (velocidad/acento por paso).
+- **Presets de estilo**: peak-time, hipnótico, melódico, industrial.
+- **Línea de tiempo** visual de la estructura + export MIDI/WAV del track entero.
+
+### 🔜 Pendiente de pulir en Fase 1
+- Variaciones/mutaciones del patrón entre drops (que el Drop 2 no sea idéntico).
+- Más motores de síntesis (808/909, bass reese, plucks) y FX (downlifters, sweeps).
+- Estructura de arreglo configurable por el usuario.
 
 ## 🎚️ Fase 2 — Mezcla y mastering (lo que más € ahorra)
 
