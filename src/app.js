@@ -548,6 +548,31 @@ function clearSample(id) {
   setStatus(`Pista <b>${id}</b> vuelve a la síntesis.`);
 }
 
+// --- Kit de fábrica: one-shots generados por síntesis (en memoria) ---
+let factoryKit = null, kitIndex = {};
+async function ensureKit() {
+  if (factoryKit) return factoryKit;
+  const mk = (fn, dur) => Tone.Offline(fn, dur);
+  factoryKit = [
+    { name: "Kick 909", buffer: await mk(() => { new Tone.MembraneSynth({ pitchDecay: 0.05, octaves: 8, envelope: { attack: 0.001, decay: 0.4, sustain: 0, release: 0.02 } }).toDestination().triggerAttackRelease("C1", "8n", 0); }, 0.6) },
+    { name: "Kick 808", buffer: await mk(() => { new Tone.MembraneSynth({ pitchDecay: 0.08, octaves: 6, oscillator: { type: "sine" }, envelope: { attack: 0.001, decay: 0.9, sustain: 0, release: 0.05 } }).toDestination().triggerAttackRelease("A0", "2n", 0); }, 1.1) },
+    { name: "Clap", buffer: await mk(() => { new Tone.NoiseSynth({ envelope: { attack: 0.002, decay: 0.25, sustain: 0 } }).connect(new Tone.Filter(1500, "bandpass").toDestination()).triggerAttackRelease("8n", 0); }, 0.5) },
+    { name: "Hat", buffer: await mk(() => { new Tone.NoiseSynth({ envelope: { attack: 0.001, decay: 0.05, sustain: 0 } }).connect(new Tone.Filter(9000, "highpass").toDestination()).triggerAttackRelease("16n", 0); }, 0.2) },
+    { name: "Perc", buffer: await mk(() => { new Tone.MetalSynth({ frequency: 300, envelope: { attack: 0.001, decay: 0.2, release: 0.05 }, harmonicity: 5.1, modulationIndex: 32, resonance: 4000, octaves: 1.5 }).toDestination().triggerAttackRelease("16n", 0); }, 0.4) },
+  ];
+  return factoryKit;
+}
+async function loadFactory(id) {
+  setStatus("Cargando kit de fábrica…");
+  const kit = await ensureKit();
+  kitIndex[id] = ((kitIndex[id] == null ? -1 : kitIndex[id]) + 1) % kit.length;
+  const item = kit[kitIndex[id]];
+  sampleBuffers[id] = item.buffer;
+  samples[id] = { name: item.name, url: null }; // generado: en memoria (no persiste)
+  invalidateVoices(); renderGrid(); markDirty();
+  setStatus(`🥁 «${item.name}» (fábrica) en <b>${id}</b>. Pulsa 📚 para el siguiente sonido.`);
+}
+
 // --- Pista de Vocal/Sample: un audio (acapella/loop) sincronizado al tempo ---
 function loadVocalFile(file) {
   setStatus(`Cargando vocal «${file.name}»…`);
@@ -563,6 +588,36 @@ function loadVocalFile(file) {
   };
   reader.readAsDataURL(file);
 }
+// Grabación de audio (micrófono) → pista de vocal
+let mediaRecorder = null, recChunks = [];
+async function toggleRecord() {
+  if (mediaRecorder && mediaRecorder.state === "recording") { mediaRecorder.stop(); return; }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { setStatus("Tu navegador no permite grabar audio."); return; }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    recChunks = [];
+    mediaRecorder = new MediaRecorder(stream);
+    mediaRecorder.ondataavailable = (e) => { if (e.data.size) recChunks.push(e.data); };
+    mediaRecorder.onstop = () => {
+      stream.getTracks().forEach((t) => t.stop());
+      const blob = new Blob(recChunks, { type: recChunks[0] ? recChunks[0].type : "audio/webm" });
+      const reader = new FileReader();
+      reader.onload = () => {
+        const url = reader.result;
+        const tb = new Tone.ToneAudioBuffer(url, () => {
+          vocalBuffer = tb; vocal.name = "grabación"; vocal.url = url;
+          invalidateVoices(); renderVocal(); markDirty();
+          setStatus("🎙️ Grabación lista en la pista de Vocal/Sample. Ajusta los compases y Play.");
+        }, () => setStatus("No se pudo decodificar la grabación."));
+      };
+      reader.readAsDataURL(blob);
+    };
+    mediaRecorder.start();
+    renderVocal();
+    setStatus("🔴 Grabando… pulsa <b>■ Parar</b> para terminar.");
+  } catch (e) { setStatus("No se pudo acceder al micrófono (permiso denegado)."); }
+}
+
 function clearVocal() {
   vocal = { name: null, url: null, bars: vocal.bars, vol: vocal.vol, mute: vocal.mute };
   vocalBuffer = null;
@@ -599,6 +654,12 @@ function renderVocal() {
   el.innerHTML = "";
   const lab = document.createElement("span"); lab.className = "em-label"; lab.textContent = "🎤 Vocal/Sample";
   el.appendChild(lab);
+  // Grabar desde el micrófono (en cualquier estado)
+  const recording = mediaRecorder && mediaRecorder.state === "recording";
+  const rec = document.createElement("button"); rec.className = "mini" + (recording ? " muted" : "");
+  rec.textContent = recording ? "■ Parar" : "🔴 Grabar"; rec.title = "Graba desde el micrófono a la pista de vocal";
+  rec.onclick = () => toggleRecord();
+  el.appendChild(rec);
   if (!vocal.name) {
     const btn = document.createElement("button"); btn.className = "tramo-add"; btn.textContent = "＋ Cargar vocal/loop";
     btn.title = "Carga una acapella, vocal o loop (.wav/.mp3) sincronizado al tempo";
@@ -1385,6 +1446,10 @@ function renderGrid() {
       samp.title = loaded ? `Sample: ${loaded.name} (clic para cambiar)` : "Cargar un sample (.wav/.mp3) — reemplaza la síntesis";
       samp.onclick = () => { sampleTarget = t.id; $("sampleInput").click(); };
       head.append(samp);
+      const lib = document.createElement("button");
+      lib.className = "mini"; lib.textContent = "📚"; lib.title = "Cargar un sonido del kit de fábrica (clic para cambiar)";
+      lib.onclick = () => loadFactory(t.id);
+      head.append(lib);
       if (loaded) {
         const x = document.createElement("button");
         x.className = "mini"; x.textContent = "✕"; x.title = "Quitar sample (volver a síntesis)";
