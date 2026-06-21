@@ -599,6 +599,16 @@ function renderProDesk() {
 // BitCrushers en el hilo principal, reproductores de vocal apilados, LFOs…).
 function disposeLive() {
   if (!live) return;
+  const nodes = live.nodes || [];
+  for (let i = nodes.length - 1; i >= 0; i--) {
+    try {
+      const n = nodes[i];
+      if (n && n.unsync) n.unsync();
+      if (n && n.stop) n.stop();
+      if (n && n.dispose) n.dispose();
+      else if (n && n.disconnect) n.disconnect();
+    } catch (e) {}
+  }
   try { if (live.out) live.out.disconnect(); } catch (e) {}
   try { if (live.masterLfo) live.masterLfo.dispose(); } catch (e) {}
   try { if (live.vocalPlayer) { live.vocalPlayer.unsync(); live.vocalPlayer.stop(); live.vocalPlayer.dispose(); } } catch (e) {}
@@ -1468,34 +1478,37 @@ function refreshSong() {
 // ----------------------------------------------------------------------------
 function buildVoices(opts = {}) {
   const dest = Tone.getDestination();
+  const nodes = [];
+  const own = (node) => { nodes.push(node); return node; };
+  const liveMode = !opts.offline && !opts.bypassMaster && !opts.flatMix;
   // Para exportar STEMS queremos el sonido "en crudo" (sin la cadena de máster),
   // para que sumen bien y los mezcles/masterices en tu DAW. bypassMaster lo omite.
   let master, out, masterGainNode = null, autoFilter = null, masterLfo = null;
   if (opts.bypassMaster) {
-    master = new Tone.Gain(0.85).connect(dest); out = master;
+    master = own(new Tone.Gain(0.85)).connect(dest); out = master;
   } else {
     // --- Cadena de mastering: EQ → glue comp → saturación → makeup(ganancia) → limitador ---
-    const limiter = new Tone.Limiter(-0.5).connect(dest); out = limiter;
+    const limiter = own(new Tone.Limiter(-0.5)).connect(dest); out = limiter;
     const makeupGain = 1.4 * Math.pow(10, (fxGlobal.masterGain || 0) / 20); // ganancia de máster ajustable
-    const makeup = new Tone.Gain(makeupGain).connect(limiter); masterGainNode = makeup;
-    const sat = new Tone.Distortion({ distortion: 0.08, oversample: "2x" }).connect(makeup);
+    const makeup = own(new Tone.Gain(makeupGain)).connect(limiter); masterGainNode = makeup;
+    const sat = own(new Tone.Distortion({ distortion: 0.08, oversample: liveMode ? "none" : "2x" })).connect(makeup);
     sat.wet.value = 0.12;                                       // calidez sutil
-    const glue = new Tone.Compressor({ threshold: -18, ratio: 2.5, attack: 0.02, release: 0.18 }).connect(sat);
-    const eq = new Tone.EQ3({ low: -1, mid: 0, high: 1.5 }).connect(glue); // limpia graves, da aire
+    const glue = own(new Tone.Compressor({ threshold: -18, ratio: 2.5, attack: 0.02, release: 0.18 })).connect(sat);
+    const eq = own(new Tone.EQ3({ low: -1, mid: 0, high: 1.5 })).connect(glue); // limpia graves, da aire
     // Auto-filtro de máster modulado por LFO ("el track respira"). Siempre en la
     // cadena; cuando el LFO está OFF queda abierto (sin efecto).
-    autoFilter = new Tone.Filter(18000, "lowpass").connect(eq);
-    masterLfo = new Tone.LFO({ frequency: 0.25, min: 18000, max: 18000, type: "sine" });
+    autoFilter = own(new Tone.Filter(18000, "lowpass")).connect(eq);
+    masterLfo = own(new Tone.LFO({ frequency: 0.25, min: 18000, max: 18000, type: "sine" }));
     masterLfo.connect(autoFilter.frequency); masterLfo.start();
     lfoSettings(masterLfo); // aplica fxGlobal.lfo
-    master = new Tone.Gain(0.85).connect(autoFilter);
+    master = own(new Tone.Gain(0.85)).connect(autoFilter);
   }
 
   // Returns globales de FX: reverb espacial + delay ping-pong (algorítmicos =
   // válidos también en el render offline de export).
-  const reverb = new Tone.Freeverb({ roomSize: 0.9, dampening: 2500 });
+  const reverb = own(new Tone.Freeverb({ roomSize: liveMode ? 0.78 : 0.9, dampening: 2500 }));
   reverb.wet.value = 1; reverb.connect(master);
-  const delay = new Tone.PingPongDelay({ delayTime: "8n", feedback: 0.32, wet: 1 }).connect(master);
+  const delay = own(new Tone.PingPongDelay({ delayTime: "8n", feedback: liveMode ? 0.22 : 0.32, wet: 1 })).connect(master);
 
   // Tira de canal por pista con RACK DE FX: canal(vol/pan/mute) → drive
   // (saturación WaveShaper) → scGain (sidechain) → máster, + envíos a reverb/delay.
@@ -1506,33 +1519,36 @@ function buildVoices(opts = {}) {
   const meters = {};
   for (const t of TRACKS) {
     const m = mixOf(t.id);
-    const c = new Tone.Channel({ volume: m.vol, pan: m.pan });
+    const c = own(new Tone.Channel({ volume: m.vol, pan: m.pan }));
     c.mute = opts.flatMix ? false : (m.mute || (solo && !m.solo));
-    const eq = new Tone.EQ3({ low: m.low || 0, mid: m.mid || 0, high: m.high || 0 });
-    const comp = new Tone.Compressor({ threshold: compThreshold(m.comp || 0), ratio: 4, attack: 0.01, release: 0.12 });
-    const drive = new Tone.WaveShaper(makeDriveCurve(m.drive || 0));
-    drive.oversample = "2x"; // saturación más suave (carácter analógico)
-    const crush = new Tone.BitCrusher(crushBits(m.crush || 0));
-    const widener = new Tone.StereoWidener(m.width != null ? m.width : 0.5);
-    const scGain = new Tone.Gain(1); // sidechain: baja por cada golpe de kick
+    const eq = own(new Tone.EQ3({ low: m.low || 0, mid: m.mid || 0, high: m.high || 0 }));
+    const comp = own(new Tone.Compressor({ threshold: compThreshold(m.comp || 0), ratio: 4, attack: 0.01, release: 0.12 }));
+    const drive = own(new Tone.WaveShaper(makeDriveCurve(m.drive || 0)));
+    drive.oversample = liveMode ? "none" : "2x"; // en vivo prioriza fluidez; export usa oversampling
+    const crush = liveMode ? null : own(new Tone.BitCrusher(crushBits(m.crush || 0)));
+    const widener = liveMode ? null : own(new Tone.StereoWidener(m.width != null ? m.width : 0.5));
+    const scGain = own(new Tone.Gain(1)); // sidechain: baja por cada golpe de kick
     // cadena de canal pro: EQ → comp → saturación → bitcrush → width → sidechain → máster
-    c.connect(eq); eq.connect(comp); comp.connect(drive); drive.connect(crush); crush.connect(widener); widener.connect(scGain); scGain.connect(master);
-    const sendRev = new Tone.Gain(m.rev || 0);   scGain.connect(sendRev);   sendRev.connect(reverb);
-    const sendDly = new Tone.Gain(m.delay || 0); scGain.connect(sendDly);   sendDly.connect(delay);
-    meters[t.id] = new Tone.Meter(); scGain.connect(meters[t.id]);
+    c.connect(eq); eq.connect(comp); comp.connect(drive);
+    if (crush && widener) { drive.connect(crush); crush.connect(widener); widener.connect(scGain); }
+    else drive.connect(scGain);
+    scGain.connect(master);
+    const sendRev = own(new Tone.Gain(m.rev || 0));   scGain.connect(sendRev);   sendRev.connect(reverb);
+    const sendDly = own(new Tone.Gain(m.delay || 0)); scGain.connect(sendDly);   sendDly.connect(delay);
+    meters[t.id] = own(new Tone.Meter()); scGain.connect(meters[t.id]);
     ch[t.id] = c;
     fx[t.id] = { eq, comp, drive, crush, widener, scGain, sendRev, sendDly };
   }
-  const masterMeter = new Tone.Meter();
+  const masterMeter = own(new Tone.Meter());
   out.connect(masterMeter); // medir la SALIDA real (post-cadena de máster)
-  const analyser = new Tone.Analyser("fft", 64); // analizador de espectro
+  const analyser = own(new Tone.Analyser("fft", liveMode ? 32 : 64)); // analizador de espectro
   out.connect(analyser);
 
   // Techno Rumble: el kick alimenta un sub sostenido (paso-bajo → reverb larga)
   // = el retumbe grave del techno oscuro. Un solo control (fxGlobal.rumble).
-  const rumbleSend = new Tone.Gain(fxGlobal.rumble || 0);
-  const rumbleFilter = new Tone.Filter(120, "lowpass");
-  const rumbleVerb = new Tone.Freeverb({ roomSize: 0.92, dampening: 1200 }); rumbleVerb.wet.value = 1;
+  const rumbleSend = own(new Tone.Gain(fxGlobal.rumble || 0));
+  const rumbleFilter = own(new Tone.Filter(120, "lowpass"));
+  const rumbleVerb = own(new Tone.Freeverb({ roomSize: liveMode ? 0.72 : 0.92, dampening: liveMode ? 1800 : 1200 })); rumbleVerb.wet.value = 1;
   rumbleSend.connect(rumbleFilter); rumbleFilter.connect(rumbleVerb); rumbleVerb.connect(master);
   fx.kick.scGain.connect(rumbleSend);
 
@@ -1540,10 +1556,10 @@ function buildVoices(opts = {}) {
   let vocalPlayer = null, vocalChannel = null;
   if (vocalBuffer && vocalBuffer.loaded) {
     const barSec = (60 / bpm()) * 4;
-    vocalChannel = new Tone.Channel({ volume: vocal.vol || 0 });
+    vocalChannel = own(new Tone.Channel({ volume: vocal.vol || 0 }));
     vocalChannel.mute = opts.flatMix ? false : !!vocal.mute;
     vocalChannel.connect(master);
-    vocalPlayer = new Tone.Player({ url: vocalBuffer, loop: true });
+    vocalPlayer = own(new Tone.Player({ url: vocalBuffer, loop: true }));
     vocalPlayer.playbackRate = Math.max(0.05, vocalBuffer.duration / ((vocal.bars || 4) * barSec));
     vocalPlayer.connect(vocalChannel);
   }
@@ -1553,88 +1569,88 @@ function buildVoices(opts = {}) {
   const players = {};
   for (const id of SAMPLEABLE) {
     if (sampleBuffers[id] && sampleBuffers[id].loaded) {
-      players[id] = new Tone.Player(sampleBuffers[id]).connect(ch[id]);
+      players[id] = own(new Tone.Player(sampleBuffers[id])).connect(ch[id]);
     }
   }
 
-  const kick = new Tone.MembraneSynth({
+  const kick = own(new Tone.MembraneSynth({
     pitchDecay: 0.03, octaves: 6, oscillator: { type: "sine" },
     envelope: { attack: 0.001, decay: 0.34, sustain: 0, release: 0.02 },
-  }).connect(ch.kick);
+  })).connect(ch.kick);
 
-  const clapFilter = new Tone.Filter(1400, "bandpass").connect(ch.clap);
-  const clap = new Tone.NoiseSynth({
+  const clapFilter = own(new Tone.Filter(1400, "bandpass")).connect(ch.clap);
+  const clap = own(new Tone.NoiseSynth({
     noise: { type: "white" }, envelope: { attack: 0.002, decay: 0.18, sustain: 0 },
-  }).connect(clapFilter);
+  })).connect(clapFilter);
 
-  const chatFilter = new Tone.Filter(8000, "highpass").connect(ch.chat);
-  const chat = new Tone.NoiseSynth({
+  const chatFilter = own(new Tone.Filter(8000, "highpass")).connect(ch.chat);
+  const chat = own(new Tone.NoiseSynth({
     noise: { type: "white" }, volume: -8, envelope: { attack: 0.001, decay: 0.03, sustain: 0 },
-  }).connect(chatFilter);
+  })).connect(chatFilter);
 
-  const ohatFilter = new Tone.Filter(7000, "highpass").connect(ch.ohat);
-  const ohat = new Tone.NoiseSynth({
+  const ohatFilter = own(new Tone.Filter(7000, "highpass")).connect(ch.ohat);
+  const ohat = own(new Tone.NoiseSynth({
     noise: { type: "white" }, volume: -10, envelope: { attack: 0.001, decay: 0.2, sustain: 0 },
-  }).connect(ohatFilter);
+  })).connect(ohatFilter);
 
   // Bajo: sinte sustractivo editable + SLIDE (portamento) = carácter Acid 303
   const bs = synth.bass;
-  const bass = new Tone.MonoSynth({
+  const bass = own(new Tone.MonoSynth({
     oscillator: bs.wave === "fatsawtooth" ? { type: "fatsawtooth", count: 3, spread: 40 } : { type: bs.wave },
     volume: -6, filter: { type: "lowpass", Q: bs.res },
     filterEnvelope: { attack: 0.005, decay: 0.12, sustain: 0.2, release: 0.1, baseFrequency: bs.cutoff, octaves: 2.6 },
     envelope: { attack: bs.attack, decay: bs.decay, sustain: bs.sustain, release: bs.release },
-  }).connect(ch.bass);
+  })).connect(ch.bass);
   bass.portamento = bs.slide || 0; // glide entre notas (acid)
   bass.detune.value = (Math.random() * 6) - 3; // ligero drift analógico (±3 cents)
 
   // Acordes: sinte editable (synth.stab) + reverb. Motor Saw o FM (stabs metálicos)
   const st = synth.stab;
-  const stabVerb = new Tone.Freeverb({ roomSize: 0.62, dampening: 3000 }).connect(ch.stab);
-  stabVerb.wet.value = 0.28;
-  const stabFilter = new Tone.Filter(st.cutoff, "lowpass").connect(stabVerb);
+  const stabVerb = own(new Tone.Freeverb({ roomSize: liveMode ? 0.42 : 0.62, dampening: 3000 })).connect(ch.stab);
+  stabVerb.wet.value = liveMode ? 0.18 : 0.28;
+  const stabFilter = own(new Tone.Filter(st.cutoff, "lowpass")).connect(stabVerb);
   stabFilter.Q.value = st.res;
   let stab;
   if (st.engine === "fm") {
-    stab = new Tone.PolySynth(Tone.FMSynth, {
+    stab = own(new Tone.PolySynth(Tone.FMSynth, {
       harmonicity: 2, modulationIndex: st.fm != null ? st.fm : 8, volume: -16,
       oscillator: { type: "sine" }, modulation: { type: "square" },
       envelope: { attack: st.attack, decay: st.decay, sustain: st.sustain, release: st.release },
       modulationEnvelope: { attack: 0.005, decay: 0.18, sustain: 0.2, release: 0.2 },
-    }).connect(stabFilter);
+    })).connect(stabFilter);
   } else if (st.engine === "pad") {
-    stab = new Tone.PolySynth(Tone.Synth, {
+    stab = own(new Tone.PolySynth(Tone.Synth, {
       oscillator: { type: "fatsawtooth", count: 3, spread: 25 }, volume: -16,
       envelope: { attack: 0.4, decay: 0.4, sustain: 0.7, release: 1.2 }, // pad sostenido
-    }).connect(stabFilter);
+    })).connect(stabFilter);
   } else if (st.engine === "pluck") {
-    stab = new Tone.PolySynth(Tone.Synth, {
+    stab = own(new Tone.PolySynth(Tone.Synth, {
       oscillator: { type: "triangle" }, volume: -12,
       envelope: { attack: 0.002, decay: 0.16, sustain: 0, release: 0.1 }, // plucky
-    }).connect(stabFilter);
+    })).connect(stabFilter);
   } else {
-    stab = new Tone.PolySynth(Tone.Synth, {
+    stab = own(new Tone.PolySynth(Tone.Synth, {
       oscillator: { type: st.wave === "fatsawtooth" ? "fatsawtooth" : st.wave }, volume: -14,
       envelope: { attack: st.attack, decay: st.decay, sustain: st.sustain, release: st.release },
-    }).connect(stabFilter);
+    })).connect(stabFilter);
   }
 
   // FX (no pasan por el pump): riser e impacto
-  const riserFilter = new Tone.Filter(300, "highpass").connect(master);
-  const riserNoise = new Tone.NoiseSynth({
+  const riserFilter = own(new Tone.Filter(300, "highpass")).connect(master);
+  const riserNoise = own(new Tone.NoiseSynth({
     noise: { type: "white" }, volume: -14, envelope: { attack: 0.01, decay: 0.01, sustain: 1, release: 0.06 },
-  }).connect(riserFilter);
+  })).connect(riserFilter);
 
-  const impactFilter = new Tone.Filter(2500, "highpass").connect(master);
-  const impact = new Tone.NoiseSynth({
+  const impactFilter = own(new Tone.Filter(2500, "highpass")).connect(master);
+  const impact = own(new Tone.NoiseSynth({
     noise: { type: "white" }, volume: -6, envelope: { attack: 0.001, decay: 1.1, sustain: 0, release: 0.1 },
-  }).connect(impactFilter);
+  })).connect(impactFilter);
 
   // Downlifter: barrido descendente para soltar tensión al salir de un drop
-  const downFilter = new Tone.Filter(9000, "lowpass").connect(master);
-  const downNoise = new Tone.NoiseSynth({
+  const downFilter = own(new Tone.Filter(9000, "lowpass")).connect(master);
+  const downNoise = own(new Tone.NoiseSynth({
     noise: { type: "pink" }, volume: -16, envelope: { attack: 0.01, decay: 0.01, sustain: 1, release: 0.06 },
-  }).connect(downFilter);
+  })).connect(downFilter);
 
   const midi = (m) => Tone.Frequency(m, "midi").toFrequency();
 
@@ -1649,6 +1665,7 @@ function buildVoices(opts = {}) {
     analyser,    // analizador de espectro (FFT) de la salida
     meters,      // medidores de nivel por pista
     masterMeter, // medidor de la salida (post-máster)
+    nodes,       // nodos creados en este grafo para liberarlos al reconstruir
     out,         // nodo final (para desconectar al destruir el grafo)
     bassSynth: bass, stabSynth: stab, stabFilter, // sintes (para ajuste en vivo)
     kick: (t) => players.kick ? players.kick.start(t) : kick.triggerAttackRelease("C1", "8n", t),
@@ -1736,7 +1753,10 @@ function buildSequence() {
     if (fxMap[g] === "riser") live.riser(time, barSec);
     if (fxMap[g] === "downlifter") live.downlifter(time, barSec);
     if (fxMap[g] === "impact") live.impact(time);
-    Tone.Draw.schedule(() => { highlight(g % STEPS); flashHits(g % STEPS); highlightSection(g); updatePosition(g); }, time);
+    Tone.Draw.schedule(() => {
+      if (!seq || Tone.Transport.state !== "started") return;
+      highlight(g % STEPS); flashHits(g % STEPS); highlightSection(g); updatePosition(g);
+    }, time);
   }, [...Array(len).keys()], "16n").start(0);
 }
 
@@ -1763,6 +1783,7 @@ function stop() {
   $("playBtn").classList.remove("playing");
   $("playBtn").textContent = "▶ Play";
   highlight(-1);
+  currentSectionIdx = -1;
   document.querySelectorAll("#tramos .tramo.playing").forEach((el) => el.classList.remove("playing"));
   const pos = $("position"); if (pos) pos.textContent = "1:1:1";
   setStatus("Parado. Pulsa <b>Play</b> para seguir.");
@@ -1817,7 +1838,7 @@ async function renderOffline(p, fx, inc, opts) {
   const seconds = totalSteps * stepDur + 1.5;
 
   return Tone.Offline(() => {
-    const v = buildVoices(opts);
+    const v = buildVoices({ ...(opts || {}), offline: true });
     if (v.vocalPlayer && !opts.flatMix) v.vocalPlayer.start(0); // vocal en el export
     for (let g = 0; g < totalSteps; g++) {
       let t = g * stepDur;
@@ -2124,8 +2145,11 @@ function setMeterBar(elId, db) {
   el.style.height = Math.max(0, Math.min(1, (v + 60) / 60)) * 100 + "%";
 }
 // Analizador de espectro (FFT) — dibuja barras de frecuencia de la salida
-function drawSpectrum() {
+let lastSpectrumDraw = 0;
+function drawSpectrum(now = 0) {
   requestAnimationFrame(drawSpectrum);
+  if (now - lastSpectrumDraw < 100) return; // 10 fps: suficiente visualmente y más amable con Web Audio
+  lastSpectrumDraw = now;
   const cv = document.getElementById("spectrum"); if (!cv) return;
   const ctx = cv.getContext("2d"); const W = cv.width, H = cv.height;
   ctx.clearRect(0, 0, W, H);
@@ -2142,8 +2166,11 @@ function drawSpectrum() {
   }
 }
 
-function meterLoop() {
+let lastMeterDraw = 0;
+function meterLoop(now = 0) {
   requestAnimationFrame(meterLoop);
+  if (now - lastMeterDraw < 90) return; // ~11 fps evita presión constante en main thread
+  lastMeterDraw = now;
   if (!live || !live.meters) return;
   const playing = window.Tone && Tone.Transport && Tone.Transport.state === "started";
   for (const t of TRACKS) setMeterBar("meter-" + t.id, playing ? live.meters[t.id].getValue() : -Infinity);
@@ -2302,6 +2329,7 @@ function renderTimeline() {
   const tl = $("timeline");
   tl.innerHTML = "";
   if (!(mode === "song" && built)) return;
+  currentSectionIdx = -1;
   built.sections.forEach((s, i) => {
     const d = document.createElement("div");
     d.className = "sec"; d.dataset.idx = i; d.style.flexGrow = s.bars;
@@ -2334,17 +2362,21 @@ function renderAutomation() {
   });
 }
 
+let currentSectionIdx = -1;
 function highlightSection(g) {
   if (!(mode === "song" && built)) return;
   const bar = Math.floor(g / STEPS);
   const idx = built.sections.findIndex((s) => bar >= s.startBar && bar < s.startBar + s.bars);
-  document.querySelectorAll(".timeline .sec").forEach((el) =>
-    el.classList.toggle("active", +el.dataset.idx === idx));
-  // Resalta también el chip del tramo que suena (sin cambiar el que editas)
-  document.querySelectorAll("#tramos .tramo").forEach((el, i) =>
-    el.classList.toggle("playing", i === idx));
-  // Vocal por tramo: suena solo en los tramos con vocal activa
-  if (live && live.vocalChannel) live.vocalChannel.mute = vocal.mute || !tramoVocalOf(idx);
+  if (idx !== currentSectionIdx) {
+    currentSectionIdx = idx;
+    document.querySelectorAll(".timeline .sec").forEach((el) =>
+      el.classList.toggle("active", +el.dataset.idx === idx));
+    // Resalta también el chip del tramo que suena (sin cambiar el que editas)
+    document.querySelectorAll("#tramos .tramo").forEach((el, i) =>
+      el.classList.toggle("playing", i === idx));
+    // Vocal por tramo: suena solo en los tramos con vocal activa
+    if (live && live.vocalChannel) live.vocalChannel.mute = vocal.mute || !tramoVocalOf(idx);
+  }
   // Playhead recorriendo TODA la canción (en px, respetando el padding)
   const tl = $("timeline"), ph = document.getElementById("tl-playhead");
   if (ph && tl) {
@@ -2363,10 +2395,14 @@ function highlight(s) {
 
 // Flash de los hits activos al sonar (en el tiempo de audio, vía Tone.Draw).
 const REDUCED_MOTION = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+let lastHitFlashAt = 0;
 function flashHits(col) {
+  const now = performance.now();
+  if (now - lastHitFlashAt < 120) return;
+  lastHitFlashAt = now;
   document.querySelectorAll(`.step.on[data-step="${col}"]`).forEach((el) => {
-    if (REDUCED_MOTION) el.animate([{ opacity: 0.55 }, { opacity: 1 }], { duration: 160, easing: "ease-out" });
-    else el.animate([{ transform: "scale(1.16)", filter: "brightness(1.9)" }, { transform: "scale(1)", filter: "brightness(1)" }], { duration: 170, easing: "ease-out" });
+    if (REDUCED_MOTION) el.animate([{ opacity: 0.65 }, { opacity: 1 }], { duration: 120, easing: "ease-out" });
+    else el.animate([{ transform: "scale(1.08)" }, { transform: "scale(1)" }], { duration: 120, easing: "ease-out" });
   });
 }
 
