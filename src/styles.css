@@ -205,8 +205,14 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px 
 .zone-title[data-collapsible]:hover { color: var(--ink-2); }
 
 /* -------------------------------------------------------------- Timeline --- */
-.timeline { display: flex; gap: var(--s-1); padding: var(--s-4) var(--s-5) 0; }
+.timeline { position: relative; display: flex; gap: var(--s-1); padding: var(--s-4) var(--s-5) 0; }
 .timeline:empty { display: none; }
+.tl-playhead {
+  position: absolute; top: var(--s-4); bottom: 0; left: 0; width: 2px;
+  background: var(--accent-2); box-shadow: 0 0 8px var(--accent-2); pointer-events: none;
+  transition: left .05s linear;
+}
+.vocal .wave { border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface-1); height: 36px; }
 .sec {
   flex: 1 1 0; min-width: 0;
   background: var(--surface-2); border: 1px solid var(--line);

@@ -654,6 +654,20 @@ function renderModulation() {
   dep.appendChild(dinp); el.appendChild(dep);
 }
 
+// Dibuja la forma de onda (picos por columna) de un AudioBuffer en un canvas
+function drawWaveform(cv, buf) {
+  const ctx = cv.getContext("2d"); const W = cv.width, H = cv.height;
+  ctx.clearRect(0, 0, W, H);
+  const data = buf.getChannelData(0), step = Math.max(1, Math.floor(data.length / W));
+  ctx.fillStyle = "#1ad4a8";
+  for (let x = 0; x < W; x++) {
+    let min = 1, max = -1;
+    for (let i = 0; i < step; i++) { const v = data[x * step + i] || 0; if (v < min) min = v; if (v > max) max = v; }
+    const y1 = (1 - max) * H / 2, y2 = (1 - min) * H / 2;
+    ctx.fillRect(x, y1, 1, Math.max(1, y2 - y1));
+  }
+}
+
 function renderVocal() {
   const el = $("vocal"); if (!el) return;
   el.innerHTML = "";
@@ -674,6 +688,10 @@ function renderVocal() {
   }
   const name = document.createElement("span"); name.className = "vocal-name"; name.textContent = vocal.name;
   el.appendChild(name);
+  // Forma de onda del audio cargado
+  const cv = document.createElement("canvas"); cv.className = "wave"; cv.width = 260; cv.height = 36;
+  el.appendChild(cv);
+  if (vocalBuffer && vocalBuffer.loaded) drawWaveform(cv, vocalBuffer.get());
   // compases (longitud del loop)
   const barsWrap = document.createElement("label"); barsWrap.className = "vocal-ctl";
   barsWrap.append(Object.assign(document.createElement("span"), { textContent: "Compases" }));
@@ -1819,6 +1837,8 @@ function renderTimeline() {
     d.innerHTML = `${s.name}<span class="bars">${s.bars} comp.</span>`;
     tl.appendChild(d);
   });
+  const ph = document.createElement("div"); ph.className = "tl-playhead"; ph.id = "tl-playhead"; ph.style.left = "0%";
+  tl.appendChild(ph);
 }
 
 function highlightSection(g) {
@@ -1832,6 +1852,13 @@ function highlightSection(g) {
     el.classList.toggle("playing", i === idx));
   // Vocal por tramo: suena solo en los tramos con vocal activa
   if (live && live.vocalChannel) live.vocalChannel.mute = vocal.mute || !tramoVocalOf(idx);
+  // Playhead recorriendo TODA la canción (en px, respetando el padding)
+  const tl = $("timeline"), ph = document.getElementById("tl-playhead");
+  if (ph && tl) {
+    const cs = getComputedStyle(tl), padL = parseFloat(cs.paddingLeft);
+    const w = tl.clientWidth - padL - parseFloat(cs.paddingRight);
+    ph.style.left = (padL + (g / built.song.kick.length) * w) + "px";
+  }
 }
 
 function highlight(s) {
