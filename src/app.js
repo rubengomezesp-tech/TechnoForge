@@ -1483,6 +1483,7 @@ function renderGrid() {
   }
   renderMixer();
   renderTramos();
+  renderPiano();
 }
 
 // --- Mezclador (zona propia, con channel strips estilo estudio) ---
@@ -1740,6 +1741,34 @@ function setEditMode(m) {
     : "Modo <b>Ratchet</b>: toca un paso activo para multiplicar el golpe (x1→x2→x3→x4).");
 }
 
+// --- Piano roll del Bajo: melodías libres (cualquier nota por paso) ---
+const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+function noteName(m) { return NOTE_NAMES[((m % 12) + 12) % 12] + (Math.floor(m / 12) - 1); }
+function renderPiano() {
+  const el = $("piano"); if (!el || el.style.display === "none") return; // solo si la zona está abierta
+  el.innerHTML = "";
+  const sc = SCALES[scaleId()];
+  const root = 24 + rootPc();          // ~C1
+  const lo = root, hi = root + 19;     // ~1.5 octavas
+  for (let midi = hi; midi >= lo; midi--) {
+    const inScale = sc.includes((((midi - root) % 12) + 12) % 12);
+    const row = document.createElement("div"); row.className = "pr-row" + (inScale ? "" : " pr-off");
+    const key = document.createElement("div"); key.className = "pr-key"; key.textContent = noteName(midi);
+    const steps = document.createElement("div"); steps.className = "pr-steps";
+    for (let s = 0; s < STEPS; s++) {
+      const cell = document.createElement("div");
+      const on = pattern.bass[s] === midi;
+      cell.className = "pr-cell" + (s % 4 === 0 ? " beat" : "") + (on ? " on" : "");
+      cell.onclick = () => {
+        pattern.bass[s] = (pattern.bass[s] === midi) ? null : midi;
+        syncTramo(); built = null; refreshSong(); renderPiano(); renderGrid(); markDirty();
+      };
+      steps.appendChild(cell);
+    }
+    row.append(key, steps); el.appendChild(row);
+  }
+}
+
 function renderTimeline() {
   const tl = $("timeline");
   tl.innerHTML = "";
@@ -1839,7 +1868,7 @@ function init() {
   // Zonas plegables (UX simple y rápida): clic en el título despliega/oculta
   document.querySelectorAll(".zone-title[data-collapsible]").forEach((h) => {
     const sec = h.nextElementSibling;
-    const set = (open) => { sec.style.display = open ? "" : "none"; h.classList.toggle("open", open); };
+    const set = (open) => { sec.style.display = open ? "" : "none"; h.classList.toggle("open", open); if (open && sec.id === "piano") renderPiano(); };
     h.onclick = () => set(sec.style.display === "none");
     set(h.dataset.open === "true");
   });
