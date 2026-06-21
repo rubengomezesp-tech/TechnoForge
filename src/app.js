@@ -193,22 +193,22 @@ function measureLUFS(buf) {
 let lastLufs = null; // último loudness integrado medido (para la lectura del máster)
 function setLufsRead() { const el = $("lufs-read"); if (el) el.textContent = lastLufs != null ? lastLufs.toFixed(1) + " LUFS" : "– LUFS"; }
 
+// Mide sobre un fragmento corto (el tramo activo ×4 compases) = rápido y
+// representativo: la ganancia de máster es global, así basta medir un trozo loud.
 async function measureLoudness() {
-  const songData = activeSong();
-  const p = songData ? songData.song : repeatPattern(pattern, 4);
-  const buffer = await renderOffline(p, songData ? songData.fx : null, () => true, {}); // con máster
+  const buffer = await renderOffline(repeatPattern(pattern, 4), null, () => true, {});
   return measureLUFS(buffer.get());
 }
 
 async function measureNow() {
-  setStatus("Midiendo loudness…");
+  setStatus("Midiendo loudness del tramo activo…");
   lastLufs = await measureLoudness();
   setLufsRead();
-  setStatus(`Loudness integrado: <b>${lastLufs.toFixed(1)} LUFS</b> (objetivo ${fxGlobal.lufsTarget}).`);
+  setStatus(`Loudness del tramo: <b>${lastLufs.toFixed(1)} LUFS</b> (objetivo ${fxGlobal.lufsTarget}). Mide desde tu drop.`);
 }
 
 async function normalizeLoudness() {
-  setStatus("Midiendo loudness y normalizando…");
+  setStatus("Midiendo y normalizando…");
   const lufs = await measureLoudness();
   const target = fxGlobal.lufsTarget;
   fxGlobal.masterGain = clamp(Math.round((fxGlobal.masterGain + (target - lufs)) * 10) / 10, -24, 24);
@@ -216,7 +216,7 @@ async function normalizeLoudness() {
   applyMasterGain();
   lastLufs = target;       // tras ajustar, el loudness queda ≈ objetivo
   renderMixer();           // refresca lectura/slider del máster
-  setStatus(`Normalizado: medido <b>${lufs.toFixed(1)} LUFS</b> → ${target} LUFS (ganancia ${fxGlobal.masterGain >= 0 ? "+" : ""}${fxGlobal.masterGain} dB).`);
+  setStatus(`Normalizado (tramo activo): <b>${lufs.toFixed(1)}</b> → ${target} LUFS (ganancia ${fxGlobal.masterGain >= 0 ? "+" : ""}${fxGlobal.masterGain} dB). Hazlo desde tu drop.`);
 }
 
 // Presets de sonido de 1 clic: moldean controles + síntesis + mezcla + FX + rumble
@@ -1184,7 +1184,9 @@ async function renderOffline(p, fx, inc, opts) {
 }
 
 async function exportWav() {
-  setStatus("Renderizando WAV…");
+  const totalBars = mode === "song" ? tramoBars.reduce((a, b) => a + b, 0) : 4;
+  setStatus(`Renderizando WAV (${totalBars} compases)… en tracks largos tarda unos segundos.`);
+  await new Promise((r) => setTimeout(r, 30)); // deja pintar el estado antes del render
   const songData = activeSong();
   const p = songData ? songData.song : repeatPattern(pattern, 4);
   const fx = songData ? songData.fx : null;
@@ -1196,7 +1198,8 @@ async function exportWav() {
 // Exporta cada instrumento como su propio WAV (en crudo, sin máster) dentro de
 // un único .zip — listo para arrastrar a Ableton/FL/Bitwig y rematar la mezcla.
 async function exportStems() {
-  setStatus("Renderizando stems… (puede tardar unos segundos)");
+  setStatus("Renderizando stems… (una pasada por pista; en tracks largos tarda).");
+  await new Promise((r) => setTimeout(r, 30));
   const songData = activeSong();
   const p = songData ? songData.song : repeatPattern(pattern, 4);
   const fx = songData ? songData.fx : null;
