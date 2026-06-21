@@ -256,12 +256,14 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px 
 /* ------------------------------------------------------------ Secuenciador - */
 .grid { padding: var(--s-4) var(--s-5); display: flex; flex-direction: column; gap: var(--s-2); }
 .track {
-  display: grid; grid-template-columns: 168px 1fr; align-items: center; gap: var(--s-3);
+  display: grid; grid-template-columns: 188px 1fr; align-items: center; gap: var(--s-3);
   background: var(--surface-1); border: 1px solid var(--line);
   border-radius: var(--r-lg); padding: 9px var(--s-3);
 }
 .track-head { display: flex; align-items: center; gap: 6px; }
-.track-head .name { font-weight: 650; font-size: 13px; min-width: 40px; }
+.track-id { display: flex; flex-direction: column; min-width: 52px; cursor: help; }
+.track-head .name { font-weight: 650; font-size: 13px; }
+.track-head .role { font-size: 8.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
 .track-head .mini {
   background: var(--surface-3); border: 1px solid var(--line); border-radius: var(--r-sm);
   padding: 4px 7px; font-size: 11px; line-height: 1; cursor: pointer;
@@ -288,6 +290,7 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px 
 }
 .step .cell-prob { left: 3px; bottom: 2px; opacity: .85; }
 .step .cell-ratchet { right: 3px; top: 2px; }
+.track.isolated-dim { opacity: .4; transition: opacity var(--t) var(--ease); }
 .step.beat { background: color-mix(in srgb, var(--surface-3) 70%, var(--surface-4)); }
 .step:hover { border-color: var(--ink-2); }
 .step:active { transform: scale(.94); }
@@ -366,6 +369,7 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px 
 
 /* ---------------------------------------------------------------- Estado --- */
 .statusbar {
+  display: flex; align-items: center; gap: var(--s-4);
   padding: 11px var(--s-5);
   margin-top: var(--s-2);
   background: var(--surface-2);
@@ -373,6 +377,7 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px 
   font-size: 12.5px; color: var(--ink-2);
 }
 .statusbar b { color: var(--ink); font-weight: 650; }
+.statusbar .help { margin-left: auto; color: var(--muted); font-size: 11.5px; text-align: right; }
 
 /* ------------------------------------------------------------- Responsive -- */
 @media (max-width: 720px) {

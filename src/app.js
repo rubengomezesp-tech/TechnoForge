@@ -17,12 +17,12 @@ const SCALES = {
 };
 
 const TRACKS = [
-  { id: "kick", name: "Kick",  type: "drum" },
-  { id: "clap", name: "Clap",  type: "drum" },
-  { id: "chat", name: "Hats",  type: "drum" },
-  { id: "ohat", name: "Open",  type: "drum" },
-  { id: "bass", name: "Bass",  type: "pitch" },
-  { id: "stab", name: "Stab",  type: "pitch" },
+  { id: "kick", name: "Kick",  type: "drum",  role: "el pulso 4x4" },
+  { id: "clap", name: "Clap",  type: "drum",  role: "backbeat (2 y 4)" },
+  { id: "chat", name: "Hats",  type: "drum",  role: "groove / relleno" },
+  { id: "ohat", name: "Open",  type: "drum",  role: "contratiempo / aire" },
+  { id: "bass", name: "Bass",  type: "pitch", role: "sub-grave" },
+  { id: "stab", name: "Stab",  type: "pitch", role: "tensión armónica" },
 ];
 
 // Cada estilo sesga la generación del patrón (carácter rítmico/percusivo)
@@ -304,6 +304,25 @@ function setVol(id, v)   { mixOf(id).vol = v; applyChannel(id); markDirty(); }
 function setPan(id, v)   { mixOf(id).pan = v; applyChannel(id); markDirty(); }
 function toggleMute(id)  { const m = mixOf(id); m.mute = !m.mute; applyChannel(id); renderGrid(); markDirty(); }
 function toggleSolo(id)  { const m = mixOf(id); m.solo = !m.solo; applyAllChannels(); renderGrid(); markDirty(); }
+
+// Aislar capa (Fase 5): mantén pulsado para oír solo una pista; suelta = vuelve.
+// Solo audio (sin re-render, para que el botón sobreviva al pointerup).
+let isolateSaved = null;
+function isolateStart(id) {
+  if (isolateSaved) return;
+  isolateSaved = TRACKS.map((t) => mixOf(t.id).solo);
+  TRACKS.forEach((t) => { mixOf(t.id).solo = (t.id === id); });
+  applyAllChannels();
+  document.querySelectorAll(".track").forEach((row, i) => row.classList.toggle("isolated-dim", TRACKS[i] && TRACKS[i].id !== id));
+  setStatus(`🎧 Aislando <b>${id}</b> — suelta para volver.`);
+}
+function isolateEnd() {
+  if (!isolateSaved) return;
+  TRACKS.forEach((t, i) => { mixOf(t.id).solo = isolateSaved[i]; });
+  isolateSaved = null;
+  applyAllChannels();
+  document.querySelectorAll(".track.isolated-dim").forEach((r) => r.classList.remove("isolated-dim"));
+}
 
 // --- Proyecto (.tfp = JSON): el proyecto es la fuente de verdad ---
 const PROJECT_VERSION = 1;
@@ -1068,7 +1087,7 @@ function buildSequence() {
     if (fxMap[g] === "riser") live.riser(time, barSec);
     if (fxMap[g] === "downlifter") live.downlifter(time, barSec);
     if (fxMap[g] === "impact") live.impact(time);
-    Tone.Draw.schedule(() => { highlight(g % STEPS); highlightSection(g); }, time);
+    Tone.Draw.schedule(() => { highlight(g % STEPS); flashHits(g % STEPS); highlightSection(g); }, time);
   }, [...Array(len).keys()], "16n").start(0);
 }
 
@@ -1247,11 +1266,15 @@ function renderGrid() {
 
     const head = document.createElement("div");
     head.className = "track-head";
-    head.innerHTML = `<span class="name">${t.name}</span>`;
+    head.innerHTML = `<span class="track-id" title="${t.name} — ${t.role}"><span class="name">${t.name}</span><span class="role">${t.role}</span></span>`;
     const r = document.createElement("button");
     r.className = "mini"; r.textContent = "🎲"; r.title = "Regenerar esta pista";
     r.onclick = () => regenTrack(t.id);
-    head.append(r);
+    const iso = document.createElement("button");
+    iso.className = "mini"; iso.textContent = "🎧"; iso.title = "Mantén pulsado para escuchar SOLO esta pista (aislar capa)";
+    iso.onpointerdown = (e) => { e.preventDefault(); isolateStart(t.id); };
+    iso.onpointerup = isolateEnd; iso.onpointerleave = isolateEnd; iso.onpointercancel = isolateEnd;
+    head.append(r, iso);
 
     // Sampler: cargar/quitar un audio real (solo pistas de batería)
     if (SAMPLEABLE.includes(t.id)) {
@@ -1580,6 +1603,15 @@ function highlight(s) {
   currentStep = s;
 }
 
+// Flash de los hits activos al sonar (en el tiempo de audio, vía Tone.Draw).
+const REDUCED_MOTION = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+function flashHits(col) {
+  document.querySelectorAll(`.step.on[data-step="${col}"]`).forEach((el) => {
+    if (REDUCED_MOTION) el.animate([{ opacity: 0.55 }, { opacity: 1 }], { duration: 160, easing: "ease-out" });
+    else el.animate([{ transform: "scale(1.16)", filter: "brightness(1.9)" }, { transform: "scale(1)", filter: "brightness(1)" }], { duration: 170, easing: "ease-out" });
+  });
+}
+
 function setStatus(html) { $("status").innerHTML = html; }
 
 // ----------------------------------------------------------------------------
@@ -1642,6 +1674,12 @@ function init() {
     const set = (open) => { sec.style.display = open ? "" : "none"; h.classList.toggle("open", open); };
     h.onclick = () => set(sec.style.display === "none");
     set(h.dataset.open === "true");
+  });
+
+  // Barra de ayuda contextual (estilo DAW): muestra el title del control bajo el cursor
+  document.addEventListener("mouseover", (e) => {
+    const el = e.target.closest("[title]");
+    const help = $("help"); if (help) help.textContent = el ? el.getAttribute("title") : "";
   });
 
   meterLoop(); // medidores del mezclador (se mueven al reproducir)
