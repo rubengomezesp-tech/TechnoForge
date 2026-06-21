@@ -79,6 +79,7 @@ let fxGlobal = { rumble: 0, masterGain: 0, lufsTarget: -9, lfo: { on: false, bar
 let synth = defaultSynths();  // sintes editables (bajo y acordes): onda/filtro/ADSR
 let proMacros = defaultProMacros(); // macros de producción: tensión/groove/dirt/space
 let proBrief = "";            // briefing/reference textual local (sin backend)
+let referenceDna = null;       // análisis local de referencia: energía/pico/duración
 let projectName = "Mi track";
 let samples = {};             // sampler: { trackId: {name, url(dataURL)} } persistente
 let sampleBuffers = {};       // { trackId: Tone.ToneAudioBuffer } en memoria (decodificado)
@@ -253,8 +254,17 @@ function measureLUFS(buf) {
   if (!n) return -70;
   return -0.691 + 10 * Math.log10(sum / n + 1e-12);
 }
+function measurePeakDb(buf) {
+  let peak = 0;
+  for (let c = 0; c < buf.numberOfChannels; c++) {
+    const data = buf.getChannelData(c);
+    for (let i = 0; i < data.length; i++) peak = Math.max(peak, Math.abs(data[i]));
+  }
+  return 20 * Math.log10(Math.max(peak, 1e-9));
+}
 
 let lastLufs = null; // último loudness integrado medido (para la lectura del máster)
+let lastPeakDb = null;
 function setLufsRead() { const el = $("lufs-read"); if (el) el.textContent = lastLufs != null ? lastLufs.toFixed(1) + " LUFS" : "– LUFS"; }
 
 function showProgress(txt) { const p = $("progress"); if (p) { const t = $("progressTxt"); if (t) t.textContent = txt || "Renderizando…"; p.hidden = false; } }
@@ -266,23 +276,33 @@ async function measureLoudness() {
   const buffer = await renderOffline(repeatPattern(pattern, 4), null, () => true, {});
   return measureLUFS(buffer.get());
 }
+async function measureMasterStats() {
+  const buffer = await renderOffline(repeatPattern(pattern, 4), null, () => true, {});
+  const audio = buffer.get();
+  return { lufs: measureLUFS(audio), peakDb: measurePeakDb(audio) };
+}
 
 async function measureNow() {
   setStatus("Midiendo loudness del tramo activo…");
-  lastLufs = await measureLoudness();
+  const stats = await measureMasterStats();
+  lastLufs = stats.lufs;
+  lastPeakDb = stats.peakDb;
   setLufsRead();
-  setStatus(`Loudness del tramo: <b>${lastLufs.toFixed(1)} LUFS</b> (objetivo ${fxGlobal.lufsTarget}). Mide desde tu drop.`);
+  renderMixer();
+  setStatus(`Master: <b>${lastLufs.toFixed(1)} LUFS</b>, pico <b>${lastPeakDb.toFixed(1)} dBFS</b> (objetivo ${fxGlobal.lufsTarget}).`);
 }
 
 async function normalizeLoudness() {
   setStatus("Midiendo y normalizando…");
-  const lufs = await measureLoudness();
+  const stats = await measureMasterStats();
+  const lufs = stats.lufs;
   const target = fxGlobal.lufsTarget;
   fxGlobal.masterGain = clamp(Math.round((fxGlobal.masterGain + (target - lufs)) * 10) / 10, -24, 24);
   applyMasterGain();       // la ganancia se aplica en vivo (sin reconstruir el grafo)
   lastLufs = target;       // tras ajustar, el loudness queda ≈ objetivo
+  lastPeakDb = stats.peakDb + (target - lufs);
   renderMixer();           // refresca lectura/slider del máster
-  setStatus(`Normalizado (tramo activo): <b>${lufs.toFixed(1)}</b> → ${target} LUFS (ganancia ${fxGlobal.masterGain >= 0 ? "+" : ""}${fxGlobal.masterGain} dB). Hazlo desde tu drop.`);
+  setStatus(`Normalizado: <b>${lufs.toFixed(1)}</b> → ${target} LUFS, pico aprox. ${lastPeakDb.toFixed(1)} dBFS (gain ${fxGlobal.masterGain >= 0 ? "+" : ""}${fxGlobal.masterGain} dB).`);
 }
 
 // Presets de sonido de 1 clic: moldean controles + síntesis + mezcla + FX + rumble
@@ -405,6 +425,176 @@ function applyGenrePreset(name) {
   setStatus(`Preset <b>${name}</b> aplicado. Pulsa <b>🎲 Generar idea</b> para un patrón del estilo, o <b>Play</b>.`);
 }
 
+function setMacro(key, value) {
+  proMacros[key] = clamp(value, 0, 1);
+  applyProMacros(false);
+  renderAutomation();
+  markDirty();
+}
+
+function applyProMacros(regenerate = true) {
+  const t = proMacros.tension, g = proMacros.groove, d = proMacros.dirt, s = proMacros.space;
+  setControlValue("energy", Math.round(44 + t * 54));
+  setControlValue("swing", Math.round(g * 14));
+  setControlValue("humanize", Math.round(g * 18));
+  const rumble = clamp(0.22 + t * 0.34 + d * 0.28, 0, 0.94);
+  fxGlobal.rumble = rumble;
+  setControlValue("rumble", Math.round(rumble * 100));
+  fxGlobal.lfo = { ...fxGlobal.lfo, on: t > 0.58, bars: t > 0.82 ? 2 : 4, depth: clamp(0.16 + t * 0.36, 0, 0.65) };
+
+  const kick = mixOf("kick"), bass = mixOf("bass"), stab = mixOf("stab"), chat = mixOf("chat"), ohat = mixOf("ohat"), clap = mixOf("clap");
+  kick.drive = clamp(0.18 + d * 0.55, 0, 0.9); kick.comp = clamp(0.28 + t * 0.4, 0, 0.85); kick.low = Math.round(1 + t * 3);
+  bass.drive = clamp(0.16 + d * 0.55, 0, 0.9); bass.comp = clamp(0.24 + t * 0.42, 0, 0.85); bass.sidechain = clamp(0.38 + t * 0.42, 0, 0.92); bass.low = Math.round(-1 - d * 4);
+  stab.rev = clamp(0.08 + s * 0.58, 0, 0.85); stab.delay = clamp(s * 0.34, 0, 0.7); stab.drive = clamp(0.08 + d * 0.38, 0, 0.75); stab.sidechain = clamp(0.32 + t * 0.34, 0, 0.82);
+  chat.high = Math.round(1 + t * 4); chat.crush = clamp(d * 0.28, 0, 0.5); chat.width = clamp(0.42 + s * 0.5, 0, 1);
+  ohat.high = Math.round(1 + t * 4); ohat.rev = clamp(s * 0.16, 0, 0.35); ohat.width = clamp(0.5 + s * 0.46, 0, 1);
+  clap.rev = clamp(s * 0.18, 0, 0.4); clap.drive = clamp(d * 0.22, 0, 0.5);
+
+  synth.bass.cutoff = clamp(80 + t * 140 + (1 - d) * 50, 50, 420);
+  synth.bass.res = clamp(2 + t * 4 + d * 2, 0, 12);
+  synth.bass.slide = clamp(synth.bass.slide + (g > 0.72 ? 0.015 : 0), 0, 0.13);
+  synth.stab.cutoff = clamp(1400 + s * 5200 - d * 900, 500, 9000);
+  synth.stab.fm = clamp(6 + d * 12, 0, 20);
+
+  applyRumble(rumble);
+  applyAllChannels();
+  for (const tr of TRACKS) applyFx(tr.id);
+  applySynth("bass"); applySynth("stab"); applyLfo();
+  renderMixer(); renderInstruments(); renderModulation();
+  if (regenerate) generate();
+}
+
+function inferPresetFromBrief(text) {
+  const b = (text || "").toLowerCase();
+  if (/\bschranz\b|155|brutal|martillo/.test(b)) return "schranz";
+  if (/\bacid\b|303|warehouse/.test(b)) return "acid";
+  if (/\braw\b|industrial|distors|sucio|roto/.test(b)) return "raw";
+  if (/mel[oó]dic|emocional|cinematic|progressive/.test(b)) return "melodic";
+  if (/hipn[oó]tico|hypnotic|loop/.test(b)) return "hypnotic";
+  if (/adrian|mills|hard groove|groove|groovy|latin/.test(b)) return "hardgroove";
+  return "hardgroove";
+}
+
+function audioStats(buf) {
+  let sum = 0, n = 0, peak = 0;
+  for (let c = 0; c < buf.numberOfChannels; c++) {
+    const data = buf.getChannelData(c);
+    const stride = Math.max(1, Math.floor(data.length / 50000));
+    for (let i = 0; i < data.length; i += stride) {
+      const v = data[i];
+      sum += v * v; n++;
+      peak = Math.max(peak, Math.abs(v));
+    }
+  }
+  const rms = Math.sqrt(sum / Math.max(1, n));
+  return { rms, peak, rmsDb: 20 * Math.log10(Math.max(rms, 1e-9)), peakDb: 20 * Math.log10(Math.max(peak, 1e-9)) };
+}
+
+function loadReferenceFile(file) {
+  if (!file || !window.Tone) return;
+  setStatus(`Analizando referencia «${file.name}»…`);
+  const reader = new FileReader();
+  reader.onload = () => {
+    const tb = new Tone.ToneAudioBuffer(reader.result, () => {
+      const buf = tb.get();
+      const stats = audioStats(buf);
+      referenceDna = {
+        name: file.name,
+        duration: Math.round(buf.duration * 10) / 10,
+        rmsDb: Math.round(stats.rmsDb * 10) / 10,
+        peakDb: Math.round(stats.peakDb * 10) / 10,
+      };
+      const energyScore = clamp((referenceDna.rmsDb + 24) / 18, 0, 1);
+      const peakScore = clamp((referenceDna.peakDb + 9) / 9, 0, 1);
+      proMacros.tension = Math.max(proMacros.tension, 0.55 + energyScore * 0.35);
+      proMacros.dirt = Math.max(proMacros.dirt, 0.35 + peakScore * 0.38);
+      proMacros.space = Math.min(proMacros.space, 0.48);
+      applyProMacros(false);
+      renderProDesk(); renderAutomation(); markDirty();
+      setStatus(`Referencia analizada: <b>${referenceDna.name}</b> · ${referenceDna.duration}s · ${referenceDna.rmsDb} dB RMS · pico ${referenceDna.peakDb} dBFS.`);
+    }, () => setStatus("No pude decodificar esa referencia (prueba WAV/MP3)."));
+  };
+  reader.readAsDataURL(file);
+}
+
+function applyBrief(makeTrack = false) {
+  const input = $("proBrief");
+  proBrief = input ? input.value : proBrief;
+  const text = proBrief.toLowerCase();
+  const preset = inferPresetFromBrief(text);
+  if ($("preset")) $("preset").value = preset;
+  applyGenrePreset(preset);
+
+  if (/oscuro|dark|maligno|tension|tensi[oó]n/.test(text)) { $("emotion").value = "tension"; $("scale").value = "phrygian"; proMacros.tension = Math.max(proMacros.tension, 0.86); }
+  if (/epic|[ée]pico|grande/.test(text)) { $("emotion").value = "epica"; $("scale").value = currentEmotion().scale; proMacros.tension = Math.max(proMacros.tension, 0.78); }
+  if (/limpio|clean|menos sucio/.test(text)) proMacros.dirt = Math.min(proMacros.dirt, 0.28);
+  if (/sucio|dirty|distors|raw|roto/.test(text)) proMacros.dirt = Math.max(proMacros.dirt, 0.82);
+  if (/espacial|reverb|abierto|atmos/.test(text)) proMacros.space = Math.max(proMacros.space, 0.62);
+  if (/seco|dry|directo/.test(text)) proMacros.space = Math.min(proMacros.space, 0.18);
+  if (/groove|swing|baila/.test(text)) proMacros.groove = Math.max(proMacros.groove, 0.74);
+  if (/recto|duro|militar/.test(text)) proMacros.groove = Math.min(proMacros.groove, 0.38);
+  const bpmMatch = text.match(/\b(12[0-9]|13[0-9]|14[0-9]|15[0-9]|160)\b/);
+  if (bpmMatch) { setControlValue("bpm", bpmMatch[1]); if (window.Tone) Tone.Transport.bpm.value = parseInt(bpmMatch[1], 10); }
+
+  applyProMacros(!makeTrack);
+  if (makeTrack) createProArrangement();
+  renderProDesk(); renderAutomation(); markDirty();
+}
+
+function renderProDesk() {
+  const el = $("prodesk"); if (!el) return;
+  el.innerHTML = "";
+
+  const brief = document.createElement("div"); brief.className = "pro-brief";
+  const briefTitle = document.createElement("div"); briefTitle.className = "pro-title";
+  briefTitle.append(Object.assign(document.createElement("span"), { textContent: "Brief / referencia" }), Object.assign(document.createElement("span"), { className: "pro-badge", textContent: "local" }));
+  const ta = document.createElement("textarea"); ta.id = "proBrief";
+  ta.placeholder = "Ej: hard groove tipo Adrian Mills, 145 BPM, oscuro, rumble agresivo, drop seco y hats con swing";
+  ta.value = proBrief;
+  ta.oninput = () => { proBrief = ta.value; markDirty(); };
+  const actions = document.createElement("div"); actions.className = "pro-actions";
+  const apply = document.createElement("button"); apply.textContent = "Aplicar brief"; apply.title = "Traduce el briefing a preset, emoción, macros y patrón";
+  apply.onclick = () => applyBrief(false);
+  const trackBtn = document.createElement("button"); trackBtn.className = "accent"; trackBtn.textContent = "Crear track pro"; trackBtn.title = "Crea un arreglo completo desde el briefing o preset actual";
+  trackBtn.onclick = () => applyBrief(true);
+  const arrange = document.createElement("button"); arrange.textContent = "Arreglo pro"; arrange.title = "Convierte el patrón actual en un track con intro/build/drop/break/drop/outro";
+  arrange.onclick = createProArrangement;
+  const master = document.createElement("button"); master.textContent = "Auto master"; master.title = "Mide loudness y ajusta el máster al objetivo";
+  master.onclick = () => normalizeLoudness();
+  const ref = document.createElement("button"); ref.textContent = "Referencia"; ref.title = "Analiza un WAV/MP3 local y ajusta macros sin copiar audio";
+  const refInput = document.createElement("input"); refInput.type = "file"; refInput.accept = "audio/*"; refInput.hidden = true;
+  ref.onclick = () => refInput.click();
+  refInput.onchange = (e) => { if (e.target.files[0]) loadReferenceFile(e.target.files[0]); e.target.value = ""; };
+  actions.append(apply, trackBtn, arrange, master, ref, refInput);
+  brief.append(briefTitle, ta, actions);
+  if (referenceDna) {
+    const refMeta = document.createElement("div"); refMeta.className = "auto-meta";
+    refMeta.textContent = `Referencia: ${referenceDna.name} · ${referenceDna.duration}s · ${referenceDna.rmsDb} dB RMS`;
+    brief.appendChild(refMeta);
+  }
+
+  const macros = document.createElement("div"); macros.className = "pro-macros";
+  const macroTitle = document.createElement("div"); macroTitle.className = "pro-title";
+  macroTitle.append(Object.assign(document.createElement("span"), { textContent: "Macros de producción" }), Object.assign(document.createElement("span"), { className: "pro-badge", textContent: "tensión/groove/suciedad/espacio" }));
+  const grid = document.createElement("div"); grid.className = "macro-grid";
+  [
+    ["tension", "Tensión"],
+    ["groove", "Groove"],
+    ["dirt", "Dirt"],
+    ["space", "Space"],
+  ].forEach(([key, label]) => {
+    const box = document.createElement("div"); box.className = "macro";
+    const lab = document.createElement("label");
+    const val = Object.assign(document.createElement("b"), { textContent: Math.round(proMacros[key] * 100) });
+    lab.append(Object.assign(document.createElement("span"), { textContent: label }), val);
+    const input = document.createElement("input"); input.type = "range"; input.min = "0"; input.max = "1"; input.step = "0.01"; input.value = proMacros[key];
+    input.oninput = () => { val.textContent = Math.round(parseFloat(input.value) * 100); setMacro(key, parseFloat(input.value)); };
+    box.append(lab, input); grid.appendChild(box);
+  });
+  macros.append(macroTitle, grid);
+  el.append(brief, macros);
+}
+
 // Destruye el grafo de audio anterior (evita fuga de nodos que cuelgan la app:
 // BitCrushers en el hilo principal, reproductores de vocal apilados, LFOs…).
 function disposeLive() {
@@ -503,6 +693,7 @@ function getProject() {
     synth,
     proMacros,
     proBrief,
+    referenceDna,
     samples,
     vocal,
   };
@@ -550,6 +741,7 @@ function loadProject(p) {
   synth = normalizeSynths(p.synth);
   proMacros = normalizeProMacros(p.proMacros);
   proBrief = p.proBrief || "";
+  referenceDna = p.referenceDna || null;
   // Sampler: re-decodifica los samples guardados en buffers de audio
   samples = {}; sampleBuffers = {};
   if (p.samples && window.Tone) {
@@ -620,6 +812,7 @@ function newProject() {
   fxGlobal = { rumble: 0, masterGain: 0, lufsTarget: -9, lfo: { on: false, bars: 2, depth: 0.5 } };
   proMacros = defaultProMacros();
   proBrief = "";
+  referenceDna = null;
   if ($("rumble")) { $("rumble").value = 0; $("rumbleOut").textContent = "0"; }
   renderModulation();
   renderProDesk(); renderAutomation();
@@ -858,6 +1051,24 @@ function addTramo() { // copia el actual para seguir creando rápido una variaci
   built = null; refreshSong(); renderGrid(); resync(); markDirty();
   setStatus(`<b>Tramo ${current + 1}</b> creado (copia). Edítalo y pulsa ➕ para el siguiente.`);
 }
+function duplicateTramo() { addTramo(); }
+function mutateTramo() {
+  pattern = tightenForHardGroove(mutate(pattern));
+  syncTramo();
+  built = null; refreshSong(); renderGrid(); resync(); markDirty();
+  setStatus(`<b>Tramo ${current + 1}</b> mutado: variación lista para otro drop o break.`);
+}
+function moveTramo(dir) {
+  const j = current + dir;
+  if (j < 0 || j >= patterns.length) return;
+  [patterns[current], patterns[j]] = [patterns[j], patterns[current]];
+  [tramoBars[current], tramoBars[j]] = [tramoBars[j], tramoBars[current]];
+  [tramoFx[current], tramoFx[j]] = [tramoFx[j], tramoFx[current]];
+  [tramoVocal[current], tramoVocal[j]] = [tramoVocal[j], tramoVocal[current]];
+  current = j; pattern = patterns[current];
+  built = null; refreshSong(); renderGrid(); resync(); markDirty();
+  setStatus(`Tramo movido a la posición <b>${current + 1}</b>.`);
+}
 function newIdeaTramo() { // tramo nuevo con una idea generada desde cero
   patterns.splice(current + 1, 0, blankPattern());
   tramoBars.splice(current + 1, 0, barsPerTramo);
@@ -901,6 +1112,22 @@ function renderTramos() {
   fresh.title = "Crea un tramo con una idea generada desde cero";
   fresh.onclick = newIdeaTramo;
   bar.appendChild(fresh);
+  const dup = document.createElement("button");
+  dup.className = "tramo-add"; dup.textContent = "⧉ Duplicar"; dup.title = "Duplica el tramo activo";
+  dup.onclick = duplicateTramo;
+  bar.appendChild(dup);
+  const mut = document.createElement("button");
+  mut.className = "tramo-add"; mut.textContent = "↯ Mutar"; mut.title = "Crea una variación musical del tramo activo";
+  mut.onclick = mutateTramo;
+  bar.appendChild(mut);
+  const prev = document.createElement("button");
+  prev.className = "tramo-del"; prev.textContent = "←"; prev.title = "Mover tramo a la izquierda";
+  prev.onclick = () => moveTramo(-1);
+  bar.appendChild(prev);
+  const next = document.createElement("button");
+  next.className = "tramo-del"; next.textContent = "→"; next.title = "Mover tramo a la derecha";
+  next.onclick = () => moveTramo(1);
+  bar.appendChild(next);
 
   // Duración (compases) del tramo activo
   const barsWrap = document.createElement("label"); barsWrap.className = "tramo-len";
@@ -1155,9 +1382,11 @@ function makeBreakPattern(src) {
   return out;
 }
 
-function createHardTechnoTrack() {
-  if ($("preset")) $("preset").value = "hardgroove";
-  applyGenrePreset("hardgroove");
+function createProArrangement() {
+  const preset = $("preset") && $("preset").value ? $("preset").value : "hardgroove";
+  if ($("preset")) $("preset").value = preset;
+  applyGenrePreset(preset);
+  applyProMacros(false);
   generate();
 
   const dropA = tightenForHardGroove(deepCopy(pattern));
@@ -1170,7 +1399,8 @@ function createHardTechnoTrack() {
   [3, 7, 11, 15].forEach((s) => { outro.chat[s] = false; outro.mods.chat[s] = null; });
 
   patterns = [intro, build, dropA, breakP, dropB, outro];
-  tramoBars = [4, 8, 16, 8, 16, 4];
+  const longDrops = proMacros.tension > 0.82 || preset === "schranz" || preset === "raw";
+  tramoBars = longDrops ? [4, 8, 16, 8, 16, 4] : [4, 8, 8, 8, 12, 4];
   tramoFx = ["none", "riser", "drop", "riser", "drop", "none"];
   tramoVocal = patterns.map(() => true);
   barsPerTramo = 8;
@@ -1182,12 +1412,19 @@ function createHardTechnoTrack() {
   refreshSong();
   renderGrid();
   renderTimeline();
+  renderAutomation();
   renderInstruments();
   renderModulation();
   renderMixer();
+  renderProDesk();
   resync();
   markDirty();
-  setStatus("Track hard listo: <b>Intro · Build · Drop · Break · Drop 2 · Outro</b>. Pulsa <b>Play</b> o exporta MIDI/Stems.");
+  setStatus("Track pro listo: <b>Intro · Build · Drop · Break · Drop 2 · Outro</b>. Pulsa <b>Play</b> o exporta MIDI/Stems.");
+}
+
+function createHardTechnoTrack() {
+  if ($("preset")) $("preset").value = "hardgroove";
+  createProArrangement();
 }
 
 // ----------------------------------------------------------------------------
@@ -1223,6 +1460,7 @@ function buildSong() {
 function refreshSong() {
   if (mode === "song") built = buildSong();
   renderTimeline();
+  renderAutomation();
 }
 
 // ----------------------------------------------------------------------------
@@ -1632,6 +1870,23 @@ async function exportStems() {
       const buf = await renderOffline(p, fx, () => false, { bypassMaster: true, flatMix: true });
       files.push({ name: `${n()}-fx.wav`, data: encodeWav(buf.get()) });
     }
+    const manifest = {
+      app: "TechnoForge",
+      version: PROJECT_VERSION,
+      name: projectName,
+      bpm: bpm(),
+      preset: $("preset") ? $("preset").value : "",
+      style: styleId(),
+      emotion: emotionId(),
+      scale: scaleId(),
+      mode,
+      proMacros,
+      referenceDna,
+      sections: patterns.map((_, i) => ({ name: `Tramo ${i + 1}`, bars: tramoBarsOf(i), transition: tramoFxOf(i) })),
+      mix,
+      note: "Stems crudos sin cadena de master para mezclar/masterizar en DAW.",
+    };
+    files.push({ name: `${n()}-manifest.json`, data: new TextEncoder().encode(JSON.stringify(manifest, null, 2)) });
     const zip = TechnoZip.create(files);
     TechnoMidi.download(zip, `technoforge-stems-${mode}-${bpm()}bpm.zip`, "application/zip");
     setStatus(`Stems exportados ✔ (${files.length} pistas) — descomprime y arrástralas a tu DAW.`);
@@ -1832,7 +2087,9 @@ function renderMixer() {
   meter.appendChild(fill); body.appendChild(meter);
 
   const lufs = document.createElement("div"); lufs.className = "strip-db"; lufs.id = "lufs-read";
-  lufs.textContent = lastLufs != null ? lastLufs.toFixed(1) + " LUFS" : "– LUFS";
+  lufs.textContent = lastLufs != null
+    ? `${lastLufs.toFixed(1)} LUFS${lastPeakDb != null ? " / " + lastPeakDb.toFixed(1) + " dB" : ""}`
+    : "– LUFS";
 
   const gain = document.createElement("input");
   gain.type = "range"; gain.className = "strip-pan"; gain.min = "-24"; gain.max = "24"; gain.step = "0.5";
@@ -2055,6 +2312,28 @@ function renderTimeline() {
   tl.appendChild(ph);
 }
 
+function renderAutomation() {
+  const lane = $("automation"); if (!lane) return;
+  lane.innerHTML = "";
+  if (!(mode === "song" && built && built.sections && built.sections.length)) return;
+  lane.style.setProperty("--auto-count", built.sections.length);
+  const total = built.sections.length - 1 || 1;
+  built.sections.forEach((s, i) => {
+    const tension = clamp((proMacros.tension * 0.55) + (i === 1 || i === 3 ? 0.22 : 0) + (i === 2 || i === 4 ? 0.34 : 0) - (i === 5 ? 0.18 : 0), 0.05, 1);
+    const groove = clamp(proMacros.groove + (i === 2 || i === 4 ? 0.08 : 0) - (i === 3 ? 0.12 : 0), 0, 1);
+    const seg = document.createElement("div");
+    seg.className = "auto-seg";
+    seg.style.flexGrow = s.bars;
+    seg.style.setProperty("--tension", tension.toFixed(2));
+    const nm = document.createElement("span"); nm.className = "auto-name"; nm.textContent = s.name;
+    const meta = document.createElement("span"); meta.className = "auto-meta";
+    const fx = tramoFxOf(i);
+    meta.textContent = `T ${Math.round(tension * 100)} · G ${Math.round(groove * 100)} · ${fx === "none" ? "dry" : fx}`;
+    seg.append(nm, meta);
+    lane.appendChild(seg);
+  });
+}
+
 function highlightSection(g) {
   if (!(mode === "song" && built)) return;
   const bar = Math.floor(g / STEPS);
@@ -2178,6 +2457,8 @@ function init() {
 
   meterLoop(); // medidores del mezclador (se mueven al reproducir)
   drawSpectrum(); // analizador de espectro
+  renderProDesk();
+  renderAutomation();
   renderInstruments();
   renderModulation();
   renderVocal();
