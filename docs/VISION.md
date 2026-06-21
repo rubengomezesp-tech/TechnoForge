@@ -178,3 +178,36 @@ escupa pistas, sino la que **amplifique el sentir humano**.
 
 Empezamos pequeño y honesto (Fase 1, en el navegador, sin humo), y cada fase
 entrega algo usable. Construimos el futuro un compás a la vez.
+
+---
+
+## 📊 Stack de referencia (qué reemplazamos)
+
+> Dirección real (2026-06-21): **plataforma completa de producción** que sustituye
+> el stack de pago. Referencia: productores de techno reconocidos (p. ej. Adrián
+> Mills, techno hispano-alemán makina/trance/latino) y el toolset estándar de
+> techno melódico/progressive documentado en la industria.
+
+| Categoría | Lo que usan (pago) | Módulo TechnoForge | Estado |
+|---|---|---|---|
+| DAW | Ableton Live, FL, Bitwig, Logic | Estudio (timeline multipista, clips) | 🔜 (núcleo iniciado) |
+| Proyecto/guardado | (en la DAW) | Proyecto `.tfp` + autosave | ✅ |
+| Mezclador | canales de la DAW | Mezclador por pista (vol/pan/mute/solo) | ✅ |
+| Sinte wavetable | Serum / Serum 2, Vital, Pigments | Sinte wavetable editable + presets | 🔜 |
+| Sinte analógico | u-he Diva, Sylenth | Sinte sustractivo (filtros tipo analógico) | 🔜 (base en MonoSynth) |
+| Sampler/drums | Kontakt, packs, Splice | Sampler + drum machine + librería | 🔜 |
+| EQ/Comp | FabFilter Pro-Q 3 / Pro-C | EQ + comp por canal | 🔜 |
+| Saturación | Decapitator, Saturn 2, Trash 2 | Saturador/distorsión por canal | 🔜 (base en máster) |
+| Reverb/Delay | Valhalla (Shimmer/Room), FabFilter | FX de envío (reverb/delay) | parcial (reverb en acordes) |
+| Sidechain/shaping | LFO Tool, ShaperBox | Sidechain/automatización de volumen | parcial (pump) |
+| Mastering | iZotope Ozone, LANDR | Cadena de máster + LUFS | parcial (cadena ✅, LUFS 🔜) |
+| Stems / separación | RX, lalal.ai | Export stems ✅ / separación IA 🔜 | parcial |
+
+Cadena típica de referencia (melodic techno): *synth → EQ (Pro-Q) → saturación
+(Saturn) → reverb (Valhalla) → sidechain (LFO Tool)*. Es el patrón que el
+mezclador + FX por canal de la plataforma debe reproducir nativamente.
+
+Fuentes: [Output – Best VST plugins for techno](https://output.com/blog/best-vst-plugins-for-techno),
+[Transition Studio – Top plugins progressive/melodic 2025](https://www.transition.studio/blog/the-top-10-synth-sound-design-plugins-for-progressive-house-melodic-techno-in-2025),
+[We Make Dance Music – Essential plugin types](https://www.wemakedancemusic.com/en/news/essential-plugin-types-melodic-techno-production),
+[Insomniac – Adrián Mills](https://www.insomniac.com/music/artists/adrian-mills/).
