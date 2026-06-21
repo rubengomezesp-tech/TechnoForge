@@ -110,7 +110,7 @@ function syncTramo() { patterns[current] = pattern; }
 function defaultMix() {
   const m = {};
   for (const t of TRACKS) {
-    const c = { vol: 0, pan: 0, mute: false, solo: false, drive: 0, sidechain: 0, rev: 0, delay: 0 };
+    const c = { vol: 0, pan: 0, mute: false, solo: false, low: 0, mid: 0, high: 0, drive: 0, sidechain: 0, rev: 0, delay: 0 };
     // Sonido techno "de fábrica": bombeo en bajo/acordes, pegada en kick, aire en stab
     if (t.id === "bass" || t.id === "stab") c.sidechain = 0.35;
     if (t.id === "stab") c.rev = 0.22;
@@ -119,7 +119,7 @@ function defaultMix() {
   }
   return m;
 }
-function mixOf(id) { return mix[id] || { vol: 0, pan: 0, mute: false, solo: false, drive: 0, sidechain: 0, rev: 0, delay: 0 }; }
+function mixOf(id) { return mix[id] || { vol: 0, pan: 0, mute: false, solo: false, low: 0, mid: 0, high: 0, drive: 0, sidechain: 0, rev: 0, delay: 0 }; }
 
 // Curva de saturación (soft-clip) para el WaveShaper del drive por canal.
 // amount 0 = identidad (sin distorsión); sube = más saturación analógica.
@@ -136,6 +136,7 @@ function makeDriveCurve(amount) {
 function applyFx(id) {
   if (live && live.fx && live.fx[id]) {
     const m = mixOf(id), f = live.fx[id];
+    if (f.eq) { f.eq.low.value = m.low || 0; f.eq.mid.value = m.mid || 0; f.eq.high.value = m.high || 0; }
     f.drive.curve = makeDriveCurve(m.drive || 0);
     f.sendRev.gain.value = m.rev || 0;
     f.sendDly.gain.value = m.delay || 0;
@@ -629,14 +630,15 @@ function buildVoices(opts = {}) {
     const m = mixOf(t.id);
     const c = new Tone.Channel({ volume: m.vol, pan: m.pan });
     c.mute = opts.flatMix ? false : (m.mute || (solo && !m.solo));
+    const eq = new Tone.EQ3({ low: m.low || 0, mid: m.mid || 0, high: m.high || 0 });
     const drive = new Tone.WaveShaper(makeDriveCurve(m.drive || 0));
     const scGain = new Tone.Gain(1); // sidechain: baja por cada golpe de kick
-    c.connect(drive); drive.connect(scGain); scGain.connect(master);
+    c.connect(eq); eq.connect(drive); drive.connect(scGain); scGain.connect(master);
     const sendRev = new Tone.Gain(m.rev || 0);   scGain.connect(sendRev);   sendRev.connect(reverb);
     const sendDly = new Tone.Gain(m.delay || 0); scGain.connect(sendDly);   sendDly.connect(delay);
     meters[t.id] = new Tone.Meter(); scGain.connect(meters[t.id]);
     ch[t.id] = c;
-    fx[t.id] = { drive, scGain, sendRev, sendDly };
+    fx[t.id] = { eq, drive, scGain, sendRev, sendDly };
   }
   const masterMeter = new Tone.Meter();
   master.connect(masterMeter);
@@ -1077,17 +1079,20 @@ function channelStrip(id, name, m, solo) {
   const mu = document.createElement("button"); mu.className = "mini" + ((m.mute || (solo && !m.solo)) ? " muted" : ""); mu.textContent = "M"; mu.title = "Silenciar"; mu.onclick = () => toggleMute(id);
   btns.append(s, mu);
 
-  // Rack de FX por canal: Drive (saturación), SC (sidechain), Rev y Dly (envíos)
+  // EQ de 3 bandas por canal + Rack de FX (drive/sidechain/envíos)
   const rack = document.createElement("div"); rack.className = "strip-fx";
-  const fxRow = (key, label, title) => {
+  const fxRow = (key, label, title, mn = 0, mx = 1, st = 0.05) => {
     const row = document.createElement("label"); row.className = "fx-ctl";
     const sp = document.createElement("span"); sp.textContent = label; sp.title = title;
     const inp = document.createElement("input");
-    inp.type = "range"; inp.min = "0"; inp.max = "1"; inp.step = "0.05"; inp.value = m[key]; inp.title = title;
+    inp.type = "range"; inp.min = mn; inp.max = mx; inp.step = st; inp.value = m[key]; inp.title = title;
     inp.oninput = () => { m[key] = parseFloat(inp.value); applyFx(id); };
     row.append(sp, inp); return row;
   };
   rack.append(
+    fxRow("low", "LO", "EQ graves (dB)", -12, 12, 1),
+    fxRow("mid", "MID", "EQ medios (dB)", -12, 12, 1),
+    fxRow("high", "HI", "EQ agudos (dB)", -12, 12, 1),
     fxRow("drive", "DRV", "Saturación / distorsión"),
     fxRow("sidechain", "SC", "Sidechain: baja con el kick"),
     fxRow("rev", "REV", "Envío a reverb espacial"),
