@@ -57,6 +57,9 @@ dependencias del proyecto):
      Lo abres en Ableton / FL Studio / Bitwig y lo terminas con tus sonidos.
    - **⬇ WAV**: te baja el audio (4 compases en modo Bucle, o el **track entero**
      en modo Track) para escuchar o compartir.
+   - **⬇ Stems**: te baja un `.zip` con **cada instrumento en su propio WAV** (en
+     crudo, sin máster), listo para arrastrar a tu DAW y mezclar/masterizar con
+     tus plugins. En modo Track incluye un stem aparte con los FX del arreglo.
 
 > El MIDI es lo más potente: te da la **idea musical** lista para que la
 > conviertas en un temazo en tu DAW con tus propios plugins.
@@ -96,6 +99,7 @@ Esto es la **Fase 0 (MVP)**. El plan completo está en
 - Audio y secuenciador: [Tone.js](https://tonejs.github.io/).
 - Exportación MIDI: escritor propio en `src/midi.js` (sin dependencias).
 - Exportación WAV: renderizado offline + codificador PCM 16 bits propio.
+- Exportación Stems: render por pista aislada + empaquetador ZIP propio (`src/zip.js`).
 
 Para publicarlo gratis en internet se puede activar **GitHub Pages** sobre este
 repositorio y tendrás una URL para abrirlo desde cualquier sitio.

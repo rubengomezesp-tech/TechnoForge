@@ -41,7 +41,8 @@ masterizar con asistencia, y dejar el toque final al productor.
   volumen competitivo.
 - 🔜 Análisis de **loudness real (LUFS)** y normalización automática a un objetivo.
 - 🔜 Mezcla automática por pista: ganancias/paneo, EQ de limpieza por instrumento.
-- 🔜 Exportar **stems** por instrumento (no solo la mezcla).
+- ✅ Exportar **stems** por instrumento (cada pista en su WAV, en crudo, dentro
+  de un `.zip`) — listo para mezclar/masterizar en el DAW.
 
 ## 🤖 Fase 3 — IA de verdad y stems
 

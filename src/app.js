@@ -232,16 +232,23 @@ function refreshSong() {
 // ----------------------------------------------------------------------------
 // Síntesis (idéntica para reproducción en vivo y exportación WAV)
 // ----------------------------------------------------------------------------
-function buildVoices() {
+function buildVoices(opts = {}) {
   const dest = Tone.getDestination();
-  // --- Cadena de mastering: EQ → glue comp → saturación suave → makeup → limitador ---
-  const limiter = new Tone.Limiter(-0.5).connect(dest);
-  const makeup = new Tone.Gain(1.4).connect(limiter);        // empuje de volumen
-  const sat = new Tone.Distortion({ distortion: 0.08, oversample: "2x" }).connect(makeup);
-  sat.wet.value = 0.12;                                       // calidez sutil
-  const glue = new Tone.Compressor({ threshold: -18, ratio: 2.5, attack: 0.02, release: 0.18 }).connect(sat);
-  const eq = new Tone.EQ3({ low: -1, mid: 0, high: 1.5 }).connect(glue); // limpia graves, da aire
-  const master = new Tone.Gain(0.85).connect(eq);
+  // Para exportar STEMS queremos el sonido "en crudo" (sin la cadena de máster),
+  // para que sumen bien y los mezcles/masterices en tu DAW. bypassMaster lo omite.
+  let master;
+  if (opts.bypassMaster) {
+    master = new Tone.Gain(0.85).connect(dest);
+  } else {
+    // --- Cadena de mastering: EQ → glue comp → saturación suave → makeup → limitador ---
+    const limiter = new Tone.Limiter(-0.5).connect(dest);
+    const makeup = new Tone.Gain(1.4).connect(limiter);        // empuje de volumen
+    const sat = new Tone.Distortion({ distortion: 0.08, oversample: "2x" }).connect(makeup);
+    sat.wet.value = 0.12;                                       // calidez sutil
+    const glue = new Tone.Compressor({ threshold: -18, ratio: 2.5, attack: 0.02, release: 0.18 }).connect(sat);
+    const eq = new Tone.EQ3({ low: -1, mid: 0, high: 1.5 }).connect(glue); // limpia graves, da aire
+    master = new Tone.Gain(0.85).connect(eq);
+  }
 
   const drumBus = new Tone.Gain(1).connect(master);
   const musicalBus = new Tone.Gain(1).connect(master); // recibe el "pump"
@@ -331,17 +338,20 @@ function buildVoices() {
   };
 }
 
-function triggerStep(v, p, s, time) {
-  if (p.kick[s] && !mutes.has("kick")) v.kick(time);
+// inc(trackId) decide si una pista suena (para aislar stems). Por defecto, todas.
+// El "pump" (sidechain) se dispara siempre con el bombo, aunque el bombo esté
+// excluido, para que el stem de bajo/acordes conserve su respiración.
+function triggerStep(v, p, s, time, inc = () => true) {
+  if (p.kick[s] && inc("kick") && !mutes.has("kick")) v.kick(time);
   if (p.kick[s]) v.pump(time);
-  if (p.clap[s] && !mutes.has("clap")) v.clap(time);
-  if (p.chat[s] && !mutes.has("chat")) {
+  if (p.clap[s] && inc("clap") && !mutes.has("clap")) v.clap(time);
+  if (p.chat[s] && inc("chat") && !mutes.has("chat")) {
     const vel = (s % 4 === 0 ? 0.95 : 0.6) + rnd() * 0.1; // humanización
     v.chat(time, clamp(vel, 0, 1));
   }
-  if (p.ohat[s] && !mutes.has("ohat")) v.ohat(time);
-  if (p.bass[s] != null && !mutes.has("bass")) v.bass(time, p.bass[s]);
-  if (p.stab[s] != null && !mutes.has("stab")) v.stab(time, p.stab[s]);
+  if (p.ohat[s] && inc("ohat") && !mutes.has("ohat")) v.ohat(time);
+  if (p.bass[s] != null && inc("bass") && !mutes.has("bass")) v.bass(time, p.bass[s]);
+  if (p.stab[s] != null && inc("stab") && !mutes.has("stab")) v.stab(time, p.stab[s]);
 }
 
 // ----------------------------------------------------------------------------
@@ -414,24 +424,21 @@ function activeSong() {
   return null;
 }
 
-async function exportWav() {
-  setStatus("Renderizando WAV…");
-  const songData = activeSong();
-  const p = songData ? songData.song : repeatPattern(pattern, 4);
-  const fx = songData ? songData.fx : null;
-
+// Renderiza el patrón/track a un AudioBuffer offline (mismo motor que en vivo).
+// inc(trackId) limita qué pistas suenan; opts.bypassMaster da el sonido en crudo.
+async function renderOffline(p, fx, inc, opts) {
   const totalSteps = p.kick.length;
   const stepDur = (60 / bpm()) / 4;
   const barSec = (60 / bpm()) * 4;
   const sw = swingAmt();
   const seconds = totalSteps * stepDur + 1.5;
 
-  const buffer = await Tone.Offline(() => {
-    const v = buildVoices();
+  return Tone.Offline(() => {
+    const v = buildVoices(opts);
     for (let g = 0; g < totalSteps; g++) {
       let t = g * stepDur;
       if (sw && g % 2 === 1) t += stepDur * sw * 0.66;
-      triggerStep(v, p, g, t);
+      triggerStep(v, p, g, t, inc);
     }
     if (fx) fx.forEach((e) => {
       const t = e.step * stepDur;
@@ -440,10 +447,42 @@ async function exportWav() {
       else v.impact(t);
     });
   }, seconds);
+}
 
-  const wav = encodeWav(buffer.get());
-  TechnoMidi.download(wav, `technoforge-${mode}-${bpm()}bpm.wav`);
+async function exportWav() {
+  setStatus("Renderizando WAV…");
+  const songData = activeSong();
+  const p = songData ? songData.song : repeatPattern(pattern, 4);
+  const fx = songData ? songData.fx : null;
+  const buffer = await renderOffline(p, fx, () => true, {});
+  TechnoMidi.download(encodeWav(buffer.get()), `technoforge-${mode}-${bpm()}bpm.wav`, "audio/wav");
   setStatus("WAV exportado ✔");
+}
+
+// Exporta cada instrumento como su propio WAV (en crudo, sin máster) dentro de
+// un único .zip — listo para arrastrar a Ableton/FL/Bitwig y rematar la mezcla.
+async function exportStems() {
+  setStatus("Renderizando stems… (puede tardar unos segundos)");
+  const songData = activeSong();
+  const p = songData ? songData.song : repeatPattern(pattern, 4);
+  const fx = songData ? songData.fx : null;
+  const files = [];
+  const n = () => String(files.length + 1).padStart(2, "0");
+
+  for (const t of TRACKS) {
+    const buf = await renderOffline(p, null, (id) => id === t.id, { bypassMaster: true });
+    files.push({ name: `${n()}-${t.id}.wav`, data: encodeWav(buf.get()) });
+    setStatus(`Stem ${t.name} listo ✔`);
+  }
+  // Stem aparte con los FX del arreglo (risers/impactos), solo en modo Track.
+  if (fx && fx.length) {
+    const buf = await renderOffline(p, fx, () => false, { bypassMaster: true });
+    files.push({ name: `${n()}-fx.wav`, data: encodeWav(buf.get()) });
+  }
+
+  const zip = TechnoZip.create(files);
+  TechnoMidi.download(zip, `technoforge-stems-${mode}-${bpm()}bpm.zip`, "application/zip");
+  setStatus(`Stems exportados ✔ (${files.length} pistas) — descomprime y arrástralas a tu DAW.`);
 }
 
 function exportMidiFile() {
@@ -566,6 +605,7 @@ function init() {
   $("modeBtn").onclick = toggleMode;
   $("midiBtn").onclick = exportMidiFile;
   $("wavBtn").onclick = exportWav;
+  $("stemsBtn").onclick = exportStems;
 
   // Cambiar tonalidad / escala / estilo regenera la idea para aplicarlos
   ["root", "scale", "style"].forEach((id) => ($(id).onchange = generate));

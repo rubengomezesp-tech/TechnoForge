@@ -107,8 +107,8 @@
     return new Uint8Array(all);
   }
 
-  function download(bytes, filename) {
-    const blob = new Blob([bytes], { type: "audio/midi" });
+  function download(bytes, filename, mime = "audio/midi") {
+    const blob = new Blob([bytes], { type: mime });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url; a.download = filename;
