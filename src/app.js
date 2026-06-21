@@ -67,6 +67,10 @@ let seq = null;
 let live = null;
 let mix = defaultMix();       // mezclador por pista: { vol(dB), pan(-1..1), mute, solo }
 let projectName = "Mi track";
+let samples = {};             // sampler: { trackId: {name, url(dataURL)} } persistente
+let sampleBuffers = {};       // { trackId: Tone.ToneAudioBuffer } en memoria (decodificado)
+let sampleTarget = null;      // pista destino del próximo archivo cargado
+const SAMPLEABLE = ["kick", "clap", "chat", "ohat"]; // pistas de batería (one-shots)
 
 const $ = (id) => document.getElementById(id);
 const rnd = Math.random;
@@ -127,6 +131,7 @@ function getProject() {
     },
     pattern,
     mix,
+    samples,
   };
 }
 
@@ -150,6 +155,17 @@ function loadProject(p) {
   ["bpm", "root", "scale", "style", "emotion", "energy", "swing"].forEach((id) => set(id, p.ui[id]));
   pattern = normalizePattern(p.pattern);
   mix = normalizeMix(p.mix);
+  // Sampler: re-decodifica los samples guardados en buffers de audio
+  samples = {}; sampleBuffers = {};
+  if (p.samples && window.Tone) {
+    for (const id of Object.keys(p.samples)) {
+      const s = p.samples[id];
+      if (s && s.url) {
+        samples[id] = s;
+        const tb = new Tone.ToneAudioBuffer(s.url, () => { sampleBuffers[id] = tb; live = null; renderGrid(); });
+      }
+    }
+  }
   mode = p.mode === "song" ? "song" : "loop";
   $("modeBtn").textContent = mode === "song" ? "🎚️ Track" : "🔁 Bucle";
   if ($("projName")) $("projName").value = projectName;
@@ -163,7 +179,12 @@ let autosaveT = null;
 function markDirty() {
   clearTimeout(autosaveT);
   autosaveT = setTimeout(() => {
-    try { localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(getProject())); } catch (e) {}
+    try {
+      localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(getProject()));
+    } catch (e) {
+      // Si los samples exceden la cuota, guarda al menos el resto (samples van en el .tfp)
+      try { const p = getProject(); p.samples = {}; localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(p)); } catch (e2) {}
+    }
   }, 400);
 }
 
@@ -190,10 +211,41 @@ function loadProjectFile(file) {
 function newProject() {
   projectName = "Mi track";
   mix = defaultMix();
+  samples = {}; sampleBuffers = {};
   if ($("projName")) $("projName").value = projectName;
   generate(); // patrón nuevo
   markDirty();
   setStatus("Proyecto nuevo. <b>Generar idea</b> y <b>Play</b>.");
+}
+
+// --- Sampler: cargar un audio real que reemplaza la síntesis de una pista ---
+function shortName(n) { return n.length > 12 ? n.slice(0, 11) + "…" : n; }
+
+function loadSampleFile(file, id) {
+  setStatus(`Cargando «${file.name}»…`);
+  const reader = new FileReader();
+  reader.onload = () => {
+    const url = reader.result; // dataURL (viaja con el proyecto .tfp)
+    const tbuf = new Tone.ToneAudioBuffer(
+      url,
+      () => {
+        sampleBuffers[id] = tbuf;
+        samples[id] = { name: file.name, url };
+        live = null; // reconstruir voces para usar el sample
+        renderGrid(); markDirty();
+        setStatus(`🎵 «${file.name}» cargado en <b>${id}</b>. Pulsa Play.`);
+      },
+      () => setStatus("No se pudo decodificar ese audio (prueba .wav o .mp3).")
+    );
+  };
+  reader.readAsDataURL(file);
+}
+
+function clearSample(id) {
+  delete samples[id]; delete sampleBuffers[id];
+  live = null;
+  renderGrid(); markDirty();
+  setStatus(`Pista <b>${id}</b> vuelve a la síntesis.`);
 }
 
 function rootPc()  { return parseInt($("root").value, 10); }
@@ -431,6 +483,15 @@ function buildVoices(opts = {}) {
   const masterMeter = new Tone.Meter();
   master.connect(masterMeter);
 
+  // Sampler: si una pista de batería tiene sample cargado, su reproductor
+  // sustituye a la síntesis (suena el audio real en vez del sintetizado).
+  const players = {};
+  for (const id of SAMPLEABLE) {
+    if (sampleBuffers[id] && sampleBuffers[id].loaded) {
+      players[id] = new Tone.Player(sampleBuffers[id]).connect(ch[id]);
+    }
+  }
+
   const kick = new Tone.MembraneSynth({
     pitchDecay: 0.03, octaves: 6, oscillator: { type: "sine" },
     envelope: { attack: 0.001, decay: 0.34, sustain: 0, release: 0.02 },
@@ -493,13 +554,14 @@ function buildVoices(opts = {}) {
     ch,          // tiras de canal del mezclador (para ajustes en vivo)
     meters,      // medidores de nivel por pista
     masterMeter, // medidor del máster
-    kick: (t) => kick.triggerAttackRelease("C1", "8n", t),
-    clap: (t) => { // dos golpes muy juntos = clap con más cuerpo
-      clap.triggerAttackRelease("16n", t, 0.9);
+    kick: (t) => players.kick ? players.kick.start(t) : kick.triggerAttackRelease("C1", "8n", t),
+    clap: (t) => {
+      if (players.clap) return players.clap.start(t);
+      clap.triggerAttackRelease("16n", t, 0.9);        // dos golpes = clap con cuerpo
       clap.triggerAttackRelease("32n", t + 0.012, 0.6);
     },
-    chat: (t, v = 1) => chat.triggerAttackRelease("32n", t, v),
-    ohat: (t) => ohat.triggerAttackRelease("16n", t, 0.9),
+    chat: (t, v = 1) => players.chat ? players.chat.start(t) : chat.triggerAttackRelease("32n", t, v),
+    ohat: (t) => players.ohat ? players.ohat.start(t) : ohat.triggerAttackRelease("16n", t, 0.9),
     bass: (t, m) => bass.triggerAttackRelease(midi(m), "16n", t),
     stab: (t, arr) => stab.triggerAttackRelease(arr.map(midi), "8n", t),
     pump: (t) => {
@@ -726,6 +788,23 @@ function renderGrid() {
     r.onclick = () => regenTrack(t.id);
     head.append(r);
 
+    // Sampler: cargar/quitar un audio real (solo pistas de batería)
+    if (SAMPLEABLE.includes(t.id)) {
+      const samp = document.createElement("button");
+      const loaded = samples[t.id];
+      samp.className = "mini sample-btn" + (loaded ? " loaded" : "");
+      samp.textContent = loaded ? "🎵" : "＋🎵";
+      samp.title = loaded ? `Sample: ${loaded.name} (clic para cambiar)` : "Cargar un sample (.wav/.mp3) — reemplaza la síntesis";
+      samp.onclick = () => { sampleTarget = t.id; $("sampleInput").click(); };
+      head.append(samp);
+      if (loaded) {
+        const x = document.createElement("button");
+        x.className = "mini"; x.textContent = "✕"; x.title = "Quitar sample (volver a síntesis)";
+        x.onclick = () => clearSample(t.id);
+        head.append(x);
+      }
+    }
+
     const steps = document.createElement("div");
     steps.className = "steps";
     for (let s = 0; s < STEPS; s++) {
@@ -867,6 +946,7 @@ function init() {
   $("newBtn").onclick = newProject;
   $("loadBtn").onclick = () => $("loadInput").click();
   $("loadInput").onchange = (e) => { if (e.target.files[0]) loadProjectFile(e.target.files[0]); e.target.value = ""; };
+  $("sampleInput").onchange = (e) => { if (e.target.files[0] && sampleTarget) loadSampleFile(e.target.files[0], sampleTarget); e.target.value = ""; };
 
   // La emoción fija escala + energía sugeridas y regenera (Motor de Armonía Emocional)
   $("emotion").onchange = () => {

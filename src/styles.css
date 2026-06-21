@@ -128,7 +128,7 @@ button.primary.playing { background: var(--accent-2); border-color: var(--accent
 
 .track {
   display: grid;
-  grid-template-columns: 120px 1fr;
+  grid-template-columns: 168px 1fr;
   align-items: center;
   gap: 12px;
   background: var(--panel);
@@ -149,6 +149,8 @@ button.primary.playing { background: var(--accent-2); border-color: var(--accent
 }
 .track-head .mini.muted { opacity: .4; }
 .track-head .mini.solo { background: var(--accent-2); border-color: var(--accent-2); color: #04221c; font-weight: 700; }
+.track-head .name { min-width: 40px; }
+.track-head .sample-btn.loaded { background: var(--accent-2); border-color: var(--accent-2); color: #04221c; }
 
 /* Títulos de zona (lógica de estudio) */
 .zone-title {
