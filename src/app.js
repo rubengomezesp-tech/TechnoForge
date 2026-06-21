@@ -154,6 +154,7 @@ function getProject() {
     current,
     barsPerTramo,
     mix,
+    synth,
     samples,
   };
 }
@@ -185,6 +186,7 @@ function loadProject(p) {
   pattern = patterns[current];
   barsPerTramo = p.barsPerTramo || 4;
   mix = normalizeMix(p.mix);
+  synth = normalizeSynths(p.synth);
   // Sampler: re-decodifica los samples guardados en buffers de audio
   samples = {}; sampleBuffers = {};
   if (p.samples && window.Tone) {
@@ -201,7 +203,7 @@ function loadProject(p) {
   if ($("projName")) $("projName").value = projectName;
   built = null; live = null; // reconstruir voces con la mezcla nueva
   if (window.Tone && Tone.Transport) Tone.Transport.bpm.value = bpm();
-  refreshSong(); renderGrid(); renderTimeline();
+  refreshSong(); renderGrid(); renderTimeline(); renderInstruments();
   return true;
 }
 
@@ -243,6 +245,7 @@ function newProject() {
   mix = defaultMix();
   samples = {}; sampleBuffers = {};
   patterns = [blankPattern()]; current = 0; pattern = patterns[0];
+  synth = defaultSynths(); renderInstruments();
   if ($("projName")) $("projName").value = projectName;
   generate(); // patrón nuevo
   markDirty();
@@ -624,6 +627,7 @@ function buildVoices(opts = {}) {
     ch,          // tiras de canal del mezclador (para ajustes en vivo)
     meters,      // medidores de nivel por pista
     masterMeter, // medidor del máster
+    bassSynth: bass, stabSynth: stab, stabFilter, // sintes (para ajuste en vivo)
     kick: (t) => players.kick ? players.kick.start(t) : kick.triggerAttackRelease("C1", "8n", t),
     clap: (t) => {
       if (players.clap) return players.clap.start(t);
@@ -971,6 +975,72 @@ function meterLoop() {
   setMeterBar("meter-master", playing && live.masterMeter ? live.masterMeter.getValue() : -Infinity);
 }
 
+// --- Sintetizadores editables (zona Instrumentos): onda + filtro + ADSR ---
+function applySynth(id) {
+  if (live) {
+    if (id === "bass" && live.bassSynth) {
+      const b = synth.bass;
+      live.bassSynth.set({
+        oscillator: { type: b.wave === "fatsawtooth" ? "fatsawtooth" : b.wave },
+        filterEnvelope: { baseFrequency: b.cutoff },
+        envelope: { attack: b.attack, decay: b.decay, sustain: b.sustain, release: b.release },
+      });
+      if (live.bassSynth.filter) live.bassSynth.filter.Q.value = b.res;
+    }
+    if (id === "stab" && live.stabSynth) {
+      const s = synth.stab;
+      live.stabSynth.set({
+        oscillator: { type: s.wave === "fatsawtooth" ? "fatsawtooth" : s.wave },
+        envelope: { attack: s.attack, decay: s.decay, sustain: s.sustain, release: s.release },
+      });
+      if (live.stabFilter) { live.stabFilter.frequency.value = s.cutoff; live.stabFilter.Q.value = s.res; }
+    }
+  }
+  markDirty();
+}
+
+const WAVE_LABELS = { sawtooth: "Sierra", square: "Cuadrada", triangle: "Triángulo", sine: "Seno", fatsawtooth: "Súper-sierra" };
+const SYNTH_RANGES = {
+  bass: { cutoff: [40, 1000, 10], res: [0, 12, 0.5], attack: [0, 0.5, 0.005], decay: [0, 1, 0.01], sustain: [0, 1, 0.05], release: [0, 1, 0.01] },
+  stab: { cutoff: [200, 12000, 100], res: [0, 12, 0.5], attack: [0, 0.5, 0.005], decay: [0, 1, 0.01], sustain: [0, 1, 0.05], release: [0, 1, 0.01] },
+};
+const PARAM_LABELS = { cutoff: "Filtro", res: "Reso", attack: "Atq", decay: "Dec", sustain: "Sus", release: "Rel" };
+
+function instrumentPanel(id, label) {
+  const p = synth[id];
+  const panel = document.createElement("div"); panel.className = "instr";
+  const h = document.createElement("div"); h.className = "instr-name"; h.textContent = label;
+  panel.appendChild(h);
+
+  const waveCtl = document.createElement("label"); waveCtl.className = "instr-ctl wave";
+  const wsp = document.createElement("span"); wsp.textContent = "Onda";
+  const sel = document.createElement("select");
+  Object.keys(WAVE_LABELS).forEach((w) => {
+    const o = document.createElement("option"); o.value = w; o.textContent = WAVE_LABELS[w];
+    if (w === p.wave) o.selected = true; sel.appendChild(o);
+  });
+  sel.onchange = () => { p.wave = sel.value; applySynth(id); };
+  waveCtl.append(wsp, sel); panel.appendChild(waveCtl);
+
+  for (const key of ["cutoff", "res", "attack", "decay", "sustain", "release"]) {
+    const [mn, mx, st] = SYNTH_RANGES[id][key];
+    const ctl = document.createElement("label"); ctl.className = "instr-ctl";
+    const sp = document.createElement("span"); sp.textContent = PARAM_LABELS[key];
+    const inp = document.createElement("input");
+    inp.type = "range"; inp.min = mn; inp.max = mx; inp.step = st; inp.value = p[key];
+    inp.oninput = () => { p[key] = parseFloat(inp.value); applySynth(id); };
+    ctl.append(sp, inp); panel.appendChild(ctl);
+  }
+  return panel;
+}
+
+function renderInstruments() {
+  const el = $("instruments"); if (!el) return;
+  el.innerHTML = "";
+  el.appendChild(instrumentPanel("bass", "Bajo"));
+  el.appendChild(instrumentPanel("stab", "Acordes"));
+}
+
 function toggleCell(t, s) {
   if (t.type === "drum") pattern[t.id][s] = !pattern[t.id][s];
   else if (t.id === "bass") pattern.bass[s] = pattern.bass[s] == null ? bassNoteAt(s) : null;
@@ -1058,6 +1128,7 @@ function init() {
   ["bpm", "energy", "swing"].forEach(bindRange);
 
   meterLoop(); // medidores del mezclador (se mueven al reproducir)
+  renderInstruments();
 
   // Restaura el último proyecto (autoguardado) o genera uno nuevo
   let restored = false;

@@ -192,6 +192,40 @@ button.primary.playing { background: var(--accent-2); border-color: var(--accent
 .tramos .tramo-add:hover { border-color: var(--accent); color: var(--text); }
 .tramos .tramo-add.fresh { border-color: var(--accent-2); color: var(--accent-2); }
 
+/* Zona Instrumentos: sintes editables */
+.instruments {
+  display: flex;
+  gap: 14px;
+  padding: 12px 20px;
+  flex-wrap: wrap;
+}
+.instr {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px 14px;
+  min-width: 260px;
+  flex: 1 1 280px;
+  max-width: 480px;
+}
+.instr-name { font-weight: 700; font-size: 13px; margin-bottom: 8px; color: var(--text); }
+.instr-ctl {
+  display: grid;
+  grid-template-columns: 52px 1fr;
+  align-items: center;
+  gap: 10px;
+  margin: 5px 0;
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .5px;
+}
+.instr-ctl input[type="range"] { width: 100%; accent-color: var(--accent); }
+.instr-ctl select {
+  background: var(--panel-2); color: var(--text);
+  border: 1px solid var(--line); border-radius: 6px; padding: 4px;
+}
+
 /* Zona Mezclador: channel strips */
 .mixer {
   display: flex;
