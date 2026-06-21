@@ -63,6 +63,7 @@ let patterns = [];            // lista de tramos (secciones); cada uno es un pat
 let current = 0;              // índice del tramo que se edita
 let barsPerTramo = 4;         // duración por defecto de un tramo nuevo (compases)
 let tramoBars = [4];          // duración (compases) de cada tramo, en paralelo a patterns
+let tramoFx = ["none"];       // transición por tramo: none|riser|impact|drop
 let mode = "loop";            // "loop" | "song"
 let built = null;             // { song, sections, fx } cuando hay track montado
 let currentStep = -1;
@@ -104,6 +105,7 @@ patterns = [blankPattern()]; // ya con arr16 inicializado
 current = 0;
 pattern = patterns[0];
 tramoBars = [4];
+tramoFx = ["none"];
 
 // Mantiene pattern === patterns[current] tras reasignar pattern
 function syncTramo() { patterns[current] = pattern; }
@@ -321,6 +323,7 @@ function getProject() {
     current,
     barsPerTramo,
     tramoBars,
+    tramoFx,
     mix,
     fxGlobal,
     synth,
@@ -361,6 +364,7 @@ function loadProject(p) {
   pattern = patterns[current];
   barsPerTramo = p.barsPerTramo || 4;
   tramoBars = patterns.map((_, i) => (p.tramoBars && p.tramoBars[i]) || barsPerTramo);
+  tramoFx = patterns.map((_, i) => (p.tramoFx && p.tramoFx[i]) || "none");
   mix = normalizeMix(p.mix);
   const g = p.fxGlobal || {};
   fxGlobal = { rumble: g.rumble || 0, masterGain: g.masterGain || 0, lufsTarget: g.lufsTarget || -9 };
@@ -432,7 +436,7 @@ function newProject() {
   projectName = "Mi track";
   mix = defaultMix();
   samples = {}; sampleBuffers = {};
-  patterns = [blankPattern()]; current = 0; pattern = patterns[0]; tramoBars = [4];
+  patterns = [blankPattern()]; current = 0; pattern = patterns[0]; tramoBars = [4]; tramoFx = ["none"];
   fxGlobal = { rumble: 0, masterGain: 0, lufsTarget: -9 };
   if ($("rumble")) { $("rumble").value = 0; $("rumbleOut").textContent = "0"; }
   synth = defaultSynths(); renderInstruments();
@@ -541,14 +545,22 @@ function selectTramo(i) {
   setStatus(`Editando <b>Tramo ${i + 1}</b> de ${patterns.length}.`);
 }
 function tramoBarsOf(i) { return tramoBars[i] || barsPerTramo; }
+function tramoFxOf(i) { return tramoFx[i] || "none"; }
 function setTramoBars(n) {
   tramoBars[current] = n;
   built = null; refreshSong(); renderTramos(); resync(); markDirty();
   setStatus(`Tramo ${current + 1}: <b>${n}</b> compases.`);
 }
+function setTramoFx(v) {
+  tramoFx[current] = v;
+  built = null; refreshSong(); renderTramos(); resync(); markDirty();
+  const lbl = { none: "sin transición", riser: "subida (riser) al final", impact: "impacto al entrar", drop: "drop (impacto + subida)" };
+  setStatus(`Tramo ${current + 1}: <b>${lbl[v]}</b>.`);
+}
 function addTramo() { // copia el actual para seguir creando rápido una variación
   patterns.splice(current + 1, 0, deepCopy(pattern));
   tramoBars.splice(current + 1, 0, tramoBarsOf(current));
+  tramoFx.splice(current + 1, 0, "none");
   current += 1; pattern = patterns[current];
   built = null; refreshSong(); renderGrid(); resync(); markDirty();
   setStatus(`<b>Tramo ${current + 1}</b> creado (copia). Edítalo y pulsa ➕ para el siguiente.`);
@@ -556,13 +568,14 @@ function addTramo() { // copia el actual para seguir creando rápido una variaci
 function newIdeaTramo() { // tramo nuevo con una idea generada desde cero
   patterns.splice(current + 1, 0, blankPattern());
   tramoBars.splice(current + 1, 0, barsPerTramo);
+  tramoFx.splice(current + 1, 0, "none");
   current += 1; pattern = patterns[current];
   generate(); // genera la idea en el tramo nuevo (sincroniza y redibuja)
   setStatus(`<b>Tramo ${current + 1}</b> con idea nueva. Sigue creando.`);
 }
 function deleteTramo(i) {
   if (patterns.length <= 1) { setStatus("Necesitas al menos un tramo."); return; }
-  patterns.splice(i, 1); tramoBars.splice(i, 1);
+  patterns.splice(i, 1); tramoBars.splice(i, 1); tramoFx.splice(i, 1);
   current = Math.max(0, Math.min(current, patterns.length - 1));
   pattern = patterns[current];
   built = null; refreshSong(); renderGrid(); resync(); markDirty();
@@ -602,6 +615,14 @@ function renderTramos() {
   [1, 2, 4, 8, 16].forEach((n) => { const o = document.createElement("option"); o.value = n; o.textContent = n; if (n === tramoBarsOf(current)) o.selected = true; sel.appendChild(o); });
   sel.onchange = () => setTramoBars(parseInt(sel.value, 10));
   barsWrap.appendChild(sel); bar.appendChild(barsWrap);
+
+  // Transición/Drop del tramo activo
+  const fxWrap = document.createElement("label"); fxWrap.className = "tramo-len";
+  fxWrap.append(Object.assign(document.createElement("span"), { textContent: "Transición" }));
+  const fxSel = document.createElement("select"); fxSel.title = "FX de transición (drop) del tramo activo";
+  [["none", "—"], ["riser", "↑ Subida"], ["impact", "💥 Impacto"], ["drop", "🔥 Drop"]].forEach(([v, t]) => { const o = document.createElement("option"); o.value = v; o.textContent = t; if (v === tramoFxOf(current)) o.selected = true; fxSel.appendChild(o); });
+  fxSel.onchange = () => setTramoFx(fxSel.value);
+  fxWrap.appendChild(fxSel); bar.appendChild(fxWrap);
 }
 
 function rootPc()  { return parseInt($("root").value, 10); }
@@ -769,6 +790,7 @@ function buildSong() {
   const song = { kick: [], clap: [], chat: [], ohat: [], bass: [], stab: [] };
   const songMods = {}; for (const k of NOTE_KEYS) songMods[k] = [];
   const sections = [];
+  const fx = [];
   let barCursor = 0;
 
   patterns.forEach((pat, i) => {
@@ -780,10 +802,14 @@ function buildSong() {
           songMods[k].push(pat.mods && pat.mods[k] ? pat.mods[k][s] : null);
         }
     sections.push({ name: "Tramo " + (i + 1), startBar: barCursor, bars });
+    // Transiciones (drops): impacto al entrar y/o subida (riser) en el último compás
+    const f = tramoFxOf(i);
+    if (f === "impact" || f === "drop") fx.push({ step: barCursor * STEPS, type: "impact" });
+    if (f === "riser" || f === "drop") fx.push({ step: (barCursor + bars - 1) * STEPS, type: "riser" });
     barCursor += bars;
   });
   song.mods = songMods;
-  return { song, sections, fx: [] };
+  return { song, sections, fx };
 }
 
 function refreshSong() {

@@ -72,7 +72,10 @@ masterizar con asistencia, y dejar el toque final al productor.
 - ✅ Síntesis **Acid 303** (slide) + **FM stabs**. **Mastering con LUFS**.
 - ✅ **Analizador de espectro** (FFT) en tiempo real. **Presets de sonido** de 1 clic
   (Hard/Melodic/Hypnotic/Industrial) que moldean mezcla+síntesis+FX+rumble.
-- 🔜 LFO matrix; Web MIDI; duración por tramo; stereo width; más instrumentos.
+- ✅ **Pista de Vocal/Sample** (loop sincronizado al tempo: acapellas/vocales/loops).
+- ✅ **Duración por tramo** (1/2/4/8/16) → canciones largas minuto a minuto.
+- ✅ **Drops automáticos** por tramo (subida/impacto/drop) usando risers e impactos.
+- 🔜 LFO matrix; Web MIDI; stereo width; más instrumentos; recorte de vocal por tramo.
 
 ## 🎚️ Fase 2 — Mezcla y mastering (en marcha)
 
