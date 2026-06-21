@@ -418,13 +418,18 @@ function buildVoices(opts = {}) {
   // no se aplica mute/solo, para que cada pista aislada se renderice siempre.
   const solo = anySolo();
   const ch = {};
+  const meters = {};
   for (const t of TRACKS) {
     const m = mixOf(t.id);
     const c = new Tone.Channel({ volume: m.vol, pan: m.pan });
     c.mute = opts.flatMix ? false : (m.mute || (solo && !m.solo));
     c.connect(t.type === "drum" ? drumBus : musicalBus);
+    meters[t.id] = new Tone.Meter();
+    c.connect(meters[t.id]);
     ch[t.id] = c;
   }
+  const masterMeter = new Tone.Meter();
+  master.connect(masterMeter);
 
   const kick = new Tone.MembraneSynth({
     pitchDecay: 0.03, octaves: 6, oscillator: { type: "sine" },
@@ -485,7 +490,9 @@ function buildVoices(opts = {}) {
   const midi = (m) => Tone.Frequency(m, "midi").toFrequency();
 
   return {
-    ch, // tiras de canal del mezclador (para ajustes en vivo)
+    ch,          // tiras de canal del mezclador (para ajustes en vivo)
+    meters,      // medidores de nivel por pista
+    masterMeter, // medidor del máster
     kick: (t) => kick.triggerAttackRelease("C1", "8n", t),
     clap: (t) => { // dos golpes muy juntos = clap con más cuerpo
       clap.triggerAttackRelease("16n", t, 0.9);
@@ -560,6 +567,7 @@ async function play() {
   Tone.Transport.start();
   $("playBtn").classList.add("playing");
   $("playBtn").textContent = "⏸ Stop";
+  setStatus(mode === "song" ? "Reproduciendo el track completo 🔊" : "Reproduciendo el bucle 🔊");
 }
 
 function stop() {
@@ -568,6 +576,7 @@ function stop() {
   $("playBtn").classList.remove("playing");
   $("playBtn").textContent = "▶ Play";
   highlight(-1);
+  setStatus("Parado. Pulsa <b>Play</b> para seguir.");
 }
 
 function togglePlay() {
@@ -712,37 +721,10 @@ function renderGrid() {
     const head = document.createElement("div");
     head.className = "track-head";
     head.innerHTML = `<span class="name">${t.name}</span>`;
-
-    const mx = mixOf(t.id);
-    const solo = anySolo();
-
-    const sBtn = document.createElement("button");
-    sBtn.className = "mini" + (mx.solo ? " solo" : "");
-    sBtn.textContent = "S"; sBtn.title = "Solo";
-    sBtn.onclick = () => toggleSolo(t.id);
-
-    const mBtn = document.createElement("button");
-    mBtn.className = "mini" + ((mx.mute || (solo && !mx.solo)) ? " muted" : "");
-    mBtn.textContent = "M"; mBtn.title = "Silenciar";
-    mBtn.onclick = () => toggleMute(t.id);
-
-    const vol = document.createElement("input");
-    vol.type = "range"; vol.className = "mix-vol";
-    vol.min = "-36"; vol.max = "6"; vol.step = "1"; vol.value = mx.vol;
-    vol.title = "Volumen (dB)";
-    vol.oninput = () => setVol(t.id, parseFloat(vol.value));
-
-    const pan = document.createElement("input");
-    pan.type = "range"; pan.className = "mix-pan";
-    pan.min = "-1"; pan.max = "1"; pan.step = "0.1"; pan.value = mx.pan;
-    pan.title = "Paneo (izquierda/derecha)";
-    pan.oninput = () => setPan(t.id, parseFloat(pan.value));
-
     const r = document.createElement("button");
     r.className = "mini"; r.textContent = "🎲"; r.title = "Regenerar esta pista";
     r.onclick = () => regenTrack(t.id);
-
-    head.append(sBtn, mBtn, vol, pan, r);
+    head.append(r);
 
     const steps = document.createElement("div");
     steps.className = "steps";
@@ -758,6 +740,75 @@ function renderGrid() {
     row.append(head, steps);
     grid.appendChild(row);
   }
+  renderMixer();
+}
+
+// --- Mezclador (zona propia, con channel strips estilo estudio) ---
+function fmtDb(v) { return (v > 0 ? "+" : "") + v + " dB"; }
+
+function channelStrip(id, name, m, solo) {
+  const strip = document.createElement("div");
+  strip.className = "strip";
+
+  const nm = document.createElement("div"); nm.className = "strip-name"; nm.textContent = name;
+
+  const body = document.createElement("div"); body.className = "strip-body";
+  const meter = document.createElement("div"); meter.className = "meter";
+  const fill = document.createElement("div"); fill.className = "meter-fill"; fill.id = "meter-" + id;
+  meter.appendChild(fill);
+  const vol = document.createElement("input");
+  vol.type = "range"; vol.className = "strip-vol";
+  vol.min = "-36"; vol.max = "6"; vol.step = "1"; vol.value = m.vol; vol.title = "Volumen";
+  const dbOut = document.createElement("div"); dbOut.className = "strip-db"; dbOut.id = "vol-" + id; dbOut.textContent = fmtDb(m.vol);
+  vol.oninput = () => { setVol(id, parseFloat(vol.value)); dbOut.textContent = fmtDb(parseFloat(vol.value)); };
+  body.append(meter, vol);
+
+  const pan = document.createElement("input");
+  pan.type = "range"; pan.className = "strip-pan";
+  pan.min = "-1"; pan.max = "1"; pan.step = "0.1"; pan.value = m.pan; pan.title = "Paneo (L/R)";
+  pan.oninput = () => setPan(id, parseFloat(pan.value));
+  const panLbl = document.createElement("div"); panLbl.className = "strip-lbl"; panLbl.textContent = "PAN";
+
+  const btns = document.createElement("div"); btns.className = "strip-btns";
+  const s = document.createElement("button"); s.className = "mini" + (m.solo ? " solo" : ""); s.textContent = "S"; s.title = "Solo"; s.onclick = () => toggleSolo(id);
+  const mu = document.createElement("button"); mu.className = "mini" + ((m.mute || (solo && !m.solo)) ? " muted" : ""); mu.textContent = "M"; mu.title = "Silenciar"; mu.onclick = () => toggleMute(id);
+  btns.append(s, mu);
+
+  strip.append(nm, body, dbOut, pan, panLbl, btns);
+  return strip;
+}
+
+function renderMixer() {
+  const mx = $("mixer"); if (!mx) return;
+  mx.innerHTML = "";
+  const solo = anySolo();
+  for (const t of TRACKS) mx.appendChild(channelStrip(t.id, t.name, mixOf(t.id), solo));
+  // Strip de máster (solo medidor por ahora)
+  const master = document.createElement("div");
+  master.className = "strip strip-master";
+  const nm = document.createElement("div"); nm.className = "strip-name"; nm.textContent = "MÁSTER";
+  const body = document.createElement("div"); body.className = "strip-body";
+  const meter = document.createElement("div"); meter.className = "meter meter-wide";
+  const fill = document.createElement("div"); fill.className = "meter-fill"; fill.id = "meter-master";
+  meter.appendChild(fill); body.appendChild(meter);
+  const sub = document.createElement("div"); sub.className = "strip-lbl"; sub.textContent = "salida";
+  master.append(nm, body, sub);
+  mx.appendChild(master);
+}
+
+// Medidores: animación continua; solo se mueven con audio sonando
+function setMeterBar(elId, db) {
+  const el = document.getElementById(elId); if (!el) return;
+  let v = typeof db === "number" ? db : (Array.isArray(db) ? db[0] : -Infinity);
+  if (!isFinite(v)) v = -60;
+  el.style.height = Math.max(0, Math.min(1, (v + 60) / 60)) * 100 + "%";
+}
+function meterLoop() {
+  requestAnimationFrame(meterLoop);
+  if (!live || !live.meters) return;
+  const playing = window.Tone && Tone.Transport && Tone.Transport.state === "started";
+  for (const t of TRACKS) setMeterBar("meter-" + t.id, playing ? live.meters[t.id].getValue() : -Infinity);
+  setMeterBar("meter-master", playing && live.masterMeter ? live.masterMeter.getValue() : -Infinity);
 }
 
 function toggleCell(t, s) {
@@ -841,6 +892,8 @@ function init() {
     };
   };
   ["bpm", "energy", "swing"].forEach(bindRange);
+
+  meterLoop(); // medidores del mezclador (se mueven al reproducir)
 
   // Restaura el último proyecto (autoguardado) o genera uno nuevo
   let restored = false;

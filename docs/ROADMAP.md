@@ -53,6 +53,9 @@ masterizar con asistencia, y dejar el toque final al productor.
   **autoguardado** en el navegador (deja de perderse al recargar).
 - ✅ **Mezclador por pista**: volumen (dB), paneo, mute y **solo** (tiras de canal
   Tone.Channel), con ajuste en tiempo real; respetado en export WAV.
+- ✅ **UI con lógica de estudio**: zonas (Secuenciador · Mezclador), channel strips
+  con fader vertical + lectura en dB + **medidores de nivel** (Tone.Meter) + strip
+  de Máster; estado de transporte actualizado al reproducir.
 - 🔜 Timeline de **clips** multipista (varios patrones encadenados, no 1 compás).
 - 🔜 EQ/compresor por canal y envíos a FX (reverb/delay) compartidos.
 
