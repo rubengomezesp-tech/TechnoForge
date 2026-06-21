@@ -68,6 +68,7 @@ let currentStep = -1;
 let seq = null;
 let live = null;
 let mix = defaultMix();       // mezclador por pista: { vol(dB), pan(-1..1), mute, solo }
+let fxGlobal = { rumble: 0 }; // FX globales (techno rumble)
 let synth = defaultSynths();  // sintes editables (bajo y acordes): onda/filtro/ADSR
 let projectName = "Mi track";
 let samples = {};             // sampler: { trackId: {name, url(dataURL)} } persistente
@@ -97,7 +98,14 @@ function syncTramo() { patterns[current] = pattern; }
 // ----------------------------------------------------------------------------
 function defaultMix() {
   const m = {};
-  for (const t of TRACKS) m[t.id] = { vol: 0, pan: 0, mute: false, solo: false, drive: 0, sidechain: 0, rev: 0, delay: 0 };
+  for (const t of TRACKS) {
+    const c = { vol: 0, pan: 0, mute: false, solo: false, drive: 0, sidechain: 0, rev: 0, delay: 0 };
+    // Sonido techno "de fábrica": bombeo en bajo/acordes, pegada en kick, aire en stab
+    if (t.id === "bass" || t.id === "stab") c.sidechain = 0.35;
+    if (t.id === "stab") c.rev = 0.22;
+    if (t.id === "kick") c.drive = 0.18;
+    m[t.id] = c;
+  }
   return m;
 }
 function mixOf(id) { return mix[id] || { vol: 0, pan: 0, mute: false, solo: false, drive: 0, sidechain: 0, rev: 0, delay: 0 }; }
@@ -122,6 +130,12 @@ function applyFx(id) {
     f.sendDly.gain.value = m.delay || 0;
     // el sidechain se aplica en cada golpe de kick (en v.sidechain)
   }
+  markDirty();
+}
+
+function applyRumble(v) {
+  fxGlobal.rumble = v;
+  if (live && live.rumbleSend) live.rumbleSend.gain.value = v;
   markDirty();
 }
 
@@ -177,6 +191,7 @@ function getProject() {
     current,
     barsPerTramo,
     mix,
+    fxGlobal,
     synth,
     samples,
   };
@@ -209,6 +224,8 @@ function loadProject(p) {
   pattern = patterns[current];
   barsPerTramo = p.barsPerTramo || 4;
   mix = normalizeMix(p.mix);
+  fxGlobal = { rumble: (p.fxGlobal && p.fxGlobal.rumble) || 0 };
+  if ($("rumble")) { $("rumble").value = Math.round(fxGlobal.rumble * 100); $("rumbleOut").textContent = $("rumble").value; }
   synth = normalizeSynths(p.synth);
   // Sampler: re-decodifica los samples guardados en buffers de audio
   samples = {}; sampleBuffers = {};
@@ -268,6 +285,8 @@ function newProject() {
   mix = defaultMix();
   samples = {}; sampleBuffers = {};
   patterns = [blankPattern()]; current = 0; pattern = patterns[0];
+  fxGlobal = { rumble: 0 };
+  if ($("rumble")) { $("rumble").value = 0; $("rumbleOut").textContent = "0"; }
   synth = defaultSynths(); renderInstruments();
   if ($("projName")) $("projName").value = projectName;
   generate(); // patrón nuevo
@@ -587,6 +606,14 @@ function buildVoices(opts = {}) {
   const masterMeter = new Tone.Meter();
   master.connect(masterMeter);
 
+  // Techno Rumble: el kick alimenta un sub sostenido (paso-bajo → reverb larga)
+  // = el retumbe grave del techno oscuro. Un solo control (fxGlobal.rumble).
+  const rumbleSend = new Tone.Gain(fxGlobal.rumble || 0);
+  const rumbleFilter = new Tone.Filter(120, "lowpass");
+  const rumbleVerb = new Tone.Freeverb({ roomSize: 0.92, dampening: 1200 }); rumbleVerb.wet.value = 1;
+  rumbleSend.connect(rumbleFilter); rumbleFilter.connect(rumbleVerb); rumbleVerb.connect(master);
+  fx.kick.scGain.connect(rumbleSend);
+
   // Sampler: si una pista de batería tiene sample cargado, su reproductor
   // sustituye a la síntesis (suena el audio real en vez del sintetizado).
   const players = {};
@@ -658,6 +685,7 @@ function buildVoices(opts = {}) {
   return {
     ch,          // tiras de canal del mezclador (para ajustes en vivo)
     fx,          // rack de FX por canal (drive/sidechain/envíos)
+    rumbleSend,  // envío al sub-rumble (techno)
     meters,      // medidores de nivel por pista
     masterMeter, // medidor del máster
     bassSynth: bass, stabSynth: stab, stabFilter, // sintes (para ajuste en vivo)
@@ -1183,6 +1211,17 @@ function init() {
     };
   };
   ["bpm", "energy", "swing"].forEach(bindRange);
+
+  // Rumble (FX global): un solo control
+  $("rumble").oninput = () => { $("rumbleOut").textContent = $("rumble").value; applyRumble(parseInt($("rumble").value, 10) / 100); };
+
+  // Zonas plegables (UX simple y rápida): clic en el título despliega/oculta
+  document.querySelectorAll(".zone-title[data-collapsible]").forEach((h) => {
+    const sec = h.nextElementSibling;
+    const set = (open) => { sec.style.display = open ? "" : "none"; h.classList.toggle("open", open); };
+    h.onclick = () => set(sec.style.display === "none");
+    set(h.dataset.open === "true");
+  });
 
   meterLoop(); // medidores del mezclador (se mueven al reproducir)
   renderInstruments();
