@@ -150,11 +150,21 @@ function applyRumble(v) {
   markDirty();
 }
 
+// Invalida las voces tras un cambio de grafo (motor FM, samples). Si está
+// sonando, las reconstruye y rehace la secuencia para oír el cambio al instante.
+function invalidateVoices() {
+  live = null;
+  if (window.Tone && Tone.Transport && Tone.Transport.state === "started") {
+    live = buildVoices();
+    buildSequence();
+  }
+}
+
 // Sintetizadores editables (subtractivo) para las pistas con tono
 function defaultSynths() {
   return {
-    bass: { wave: "sawtooth", cutoff: 90,   res: 2, attack: 0.005, decay: 0.20, sustain: 0.45, release: 0.12 },
-    stab: { wave: "sawtooth", cutoff: 2200, res: 1, attack: 0.006, decay: 0.22, sustain: 0.05, release: 0.18 },
+    bass: { wave: "sawtooth", cutoff: 90,   res: 2, attack: 0.005, decay: 0.20, sustain: 0.45, release: 0.12, slide: 0 },
+    stab: { wave: "sawtooth", cutoff: 2200, res: 1, attack: 0.006, decay: 0.22, sustain: 0.05, release: 0.18, engine: "saw", fm: 8 },
   };
 }
 function normalizeSynths(src) {
@@ -323,9 +333,9 @@ function loadSampleFile(file, id) {
       () => {
         sampleBuffers[id] = tbuf;
         samples[id] = { name: file.name, url };
-        live = null; // reconstruir voces para usar el sample
+        invalidateVoices(); // usar el sample (en vivo si está sonando)
         renderGrid(); markDirty();
-        setStatus(`🎵 «${file.name}» cargado en <b>${id}</b>. Pulsa Play.`);
+        setStatus(`🎵 «${file.name}» cargado en <b>${id}</b>.`);
       },
       () => setStatus("No se pudo decodificar ese audio (prueba .wav o .mp3).")
     );
@@ -335,7 +345,7 @@ function loadSampleFile(file, id) {
 
 function clearSample(id) {
   delete samples[id]; delete sampleBuffers[id];
-  live = null;
+  invalidateVoices();
   renderGrid(); markDirty();
   setStatus(`Pista <b>${id}</b> vuelve a la síntesis.`);
 }
@@ -668,7 +678,7 @@ function buildVoices(opts = {}) {
     noise: { type: "white" }, volume: -10, envelope: { attack: 0.001, decay: 0.2, sustain: 0 },
   }).connect(ohatFilter);
 
-  // Bajo: sinte sustractivo editable (onda/filtro/ADSR desde synth.bass)
+  // Bajo: sinte sustractivo editable + SLIDE (portamento) = carácter Acid 303
   const bs = synth.bass;
   const bass = new Tone.MonoSynth({
     oscillator: bs.wave === "fatsawtooth" ? { type: "fatsawtooth", count: 3, spread: 40 } : { type: bs.wave },
@@ -676,17 +686,28 @@ function buildVoices(opts = {}) {
     filterEnvelope: { attack: 0.005, decay: 0.12, sustain: 0.2, release: 0.1, baseFrequency: bs.cutoff, octaves: 2.6 },
     envelope: { attack: bs.attack, decay: bs.decay, sustain: bs.sustain, release: bs.release },
   }).connect(ch.bass);
+  bass.portamento = bs.slide || 0; // glide entre notas (acid)
 
-  // Acordes: sinte editable (synth.stab) + reverb (Freeverb, válido en render offline)
+  // Acordes: sinte editable (synth.stab) + reverb. Motor Saw o FM (stabs metálicos)
   const st = synth.stab;
   const stabVerb = new Tone.Freeverb({ roomSize: 0.62, dampening: 3000 }).connect(ch.stab);
   stabVerb.wet.value = 0.28;
   const stabFilter = new Tone.Filter(st.cutoff, "lowpass").connect(stabVerb);
   stabFilter.Q.value = st.res;
-  const stab = new Tone.PolySynth(Tone.Synth, {
-    oscillator: { type: st.wave === "fatsawtooth" ? "fatsawtooth" : st.wave }, volume: -14,
-    envelope: { attack: st.attack, decay: st.decay, sustain: st.sustain, release: st.release },
-  }).connect(stabFilter);
+  let stab;
+  if (st.engine === "fm") {
+    stab = new Tone.PolySynth(Tone.FMSynth, {
+      harmonicity: 2, modulationIndex: st.fm != null ? st.fm : 8, volume: -16,
+      oscillator: { type: "sine" }, modulation: { type: "square" },
+      envelope: { attack: st.attack, decay: st.decay, sustain: st.sustain, release: st.release },
+      modulationEnvelope: { attack: 0.005, decay: 0.18, sustain: 0.2, release: 0.2 },
+    }).connect(stabFilter);
+  } else {
+    stab = new Tone.PolySynth(Tone.Synth, {
+      oscillator: { type: st.wave === "fatsawtooth" ? "fatsawtooth" : st.wave }, volume: -14,
+      envelope: { attack: st.attack, decay: st.decay, sustain: st.sustain, release: st.release },
+    }).connect(stabFilter);
+  }
 
   // FX (no pasan por el pump): riser e impacto
   const riserFilter = new Tone.Filter(300, "highpass").connect(master);
@@ -756,6 +777,7 @@ function buildVoices(opts = {}) {
 // El "pump" (sidechain) se dispara siempre con el bombo, aunque el bombo esté
 // excluido, para que el stem de bajo/acordes conserve su respiración.
 function triggerStep(v, p, s, time, inc = () => true) {
+  if (!v) return; // seguridad: voces aún no reconstruidas
   const stepDur = (60 / bpm()) / 4;
   const jAmt = humanizeAmt();                       // 0..1
   const jit = () => jAmt ? (rnd() - 0.5) * jAmt * 0.02 : 0; // ±10ms máx
@@ -1120,13 +1142,13 @@ function applySynth(id) {
         envelope: { attack: b.attack, decay: b.decay, sustain: b.sustain, release: b.release },
       });
       if (live.bassSynth.filter) live.bassSynth.filter.Q.value = b.res;
+      live.bassSynth.portamento = b.slide || 0; // slide acid
     }
     if (id === "stab" && live.stabSynth) {
       const s = synth.stab;
-      live.stabSynth.set({
-        oscillator: { type: s.wave === "fatsawtooth" ? "fatsawtooth" : s.wave },
-        envelope: { attack: s.attack, decay: s.decay, sustain: s.sustain, release: s.release },
-      });
+      live.stabSynth.set({ envelope: { attack: s.attack, decay: s.decay, sustain: s.sustain, release: s.release } });
+      if (s.engine === "fm") live.stabSynth.set({ modulationIndex: s.fm });
+      else live.stabSynth.set({ oscillator: { type: s.wave === "fatsawtooth" ? "fatsawtooth" : s.wave } });
       if (live.stabFilter) { live.stabFilter.frequency.value = s.cutoff; live.stabFilter.Q.value = s.res; }
     }
   }
@@ -1146,25 +1168,43 @@ function instrumentPanel(id, label) {
   const h = document.createElement("div"); h.className = "instr-name"; h.textContent = label;
   panel.appendChild(h);
 
-  const waveCtl = document.createElement("label"); waveCtl.className = "instr-ctl wave";
-  const wsp = document.createElement("span"); wsp.textContent = "Onda";
-  const sel = document.createElement("select");
-  Object.keys(WAVE_LABELS).forEach((w) => {
-    const o = document.createElement("option"); o.value = w; o.textContent = WAVE_LABELS[w];
-    if (w === p.wave) o.selected = true; sel.appendChild(o);
-  });
-  sel.onchange = () => { p.wave = sel.value; applySynth(id); };
-  waveCtl.append(wsp, sel); panel.appendChild(waveCtl);
-
-  for (const key of ["cutoff", "res", "attack", "decay", "sustain", "release"]) {
-    const [mn, mx, st] = SYNTH_RANGES[id][key];
+  const mkSelect = (labelTxt, options, value, onpick) => {
     const ctl = document.createElement("label"); ctl.className = "instr-ctl";
-    const sp = document.createElement("span"); sp.textContent = PARAM_LABELS[key];
+    const sp = document.createElement("span"); sp.textContent = labelTxt;
+    const sel = document.createElement("select");
+    options.forEach(([val, txt]) => { const o = document.createElement("option"); o.value = val; o.textContent = txt; if (val === value) o.selected = true; sel.appendChild(o); });
+    sel.onchange = () => onpick(sel.value);
+    ctl.append(sp, sel); panel.appendChild(ctl);
+  };
+  const mkSlider = (key, labelTxt, mn, mx, st) => {
+    const ctl = document.createElement("label"); ctl.className = "instr-ctl";
+    const sp = document.createElement("span"); sp.textContent = labelTxt;
     const inp = document.createElement("input");
     inp.type = "range"; inp.min = mn; inp.max = mx; inp.step = st; inp.value = p[key];
     inp.oninput = () => { p[key] = parseFloat(inp.value); applySynth(id); };
     ctl.append(sp, inp); panel.appendChild(ctl);
+  };
+
+  // Motor del stab: Saw o FM (cambia el tipo de voz → reconstruye al reproducir)
+  if (id === "stab") {
+    mkSelect("Motor", [["saw", "Saw"], ["fm", "FM"]], p.engine, (v) => {
+      p.engine = v; renderInstruments(); invalidateVoices();
+      setStatus(v === "fm" ? "Acordes en <b>FM</b> (metálico/industrial)." : "Acordes en <b>Saw</b>.");
+    });
   }
+  // Onda (se oculta en FM: el timbre lo da el índice de modulación)
+  if (!(id === "stab" && p.engine === "fm")) {
+    mkSelect("Onda", Object.keys(WAVE_LABELS).map((w) => [w, WAVE_LABELS[w]]), p.wave, (v) => { p.wave = v; applySynth(id); });
+  }
+
+  for (const key of ["cutoff", "res", "attack", "decay", "sustain", "release"]) {
+    const [mn, mx, st] = SYNTH_RANGES[id][key];
+    mkSlider(key, PARAM_LABELS[key], mn, mx, st);
+  }
+
+  if (id === "bass") mkSlider("slide", "Slide", 0, 0.15, 0.005);          // glide acid 303
+  if (id === "stab" && p.engine === "fm") mkSlider("fm", "FM", 0, 20, 0.5); // brillo FM
+
   return panel;
 }
 
