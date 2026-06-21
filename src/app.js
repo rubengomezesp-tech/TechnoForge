@@ -58,8 +58,10 @@ const ARRANGEMENT = [
   { name: "Outro",  bars: 4, keep: ["kick", "chat"] },
 ];
 
-let pattern;                  // el bucle base (el "drop") — inicializado abajo,
-                              // tras definir arr16/blankPattern (evita TDZ al cargar)
+let pattern;                  // el bucle del tramo activo === patterns[current]
+let patterns = [];            // lista de tramos (secciones); cada uno es un patrón
+let current = 0;              // índice del tramo que se edita
+let barsPerTramo = 4;         // cuántos compases dura cada tramo en modo Track
 let mode = "loop";            // "loop" | "song"
 let built = null;             // { song, sections, fx } cuando hay track montado
 let currentStep = -1;
@@ -82,7 +84,12 @@ function blankPattern() {
            ohat: arr16(false), bass: arr16(null), stab: arr16(null) };
 }
 
-pattern = blankPattern(); // ya con arr16 inicializado
+patterns = [blankPattern()]; // ya con arr16 inicializado
+current = 0;
+pattern = patterns[0];
+
+// Mantiene pattern === patterns[current] tras reasignar pattern
+function syncTramo() { patterns[current] = pattern; }
 
 // ----------------------------------------------------------------------------
 // Núcleo de estudio: mezclador por pista + proyecto (guardar/cargar/autosave)
@@ -129,7 +136,9 @@ function getProject() {
       style: $("style").value, emotion: $("emotion").value,
       energy: $("energy").value, swing: $("swing").value,
     },
-    pattern,
+    patterns,
+    current,
+    barsPerTramo,
     mix,
     samples,
   };
@@ -153,7 +162,14 @@ function loadProject(p) {
     el.value = v; const out = $(id + "Out"); if (out) out.textContent = v;
   };
   ["bpm", "root", "scale", "style", "emotion", "energy", "swing"].forEach((id) => set(id, p.ui[id]));
-  pattern = normalizePattern(p.pattern);
+  if (Array.isArray(p.patterns) && p.patterns.length) {
+    patterns = p.patterns.map(normalizePattern);
+  } else {
+    patterns = [normalizePattern(p.pattern)]; // compat: proyectos de una sola sección
+  }
+  current = Math.max(0, Math.min(p.current || 0, patterns.length - 1));
+  pattern = patterns[current];
+  barsPerTramo = p.barsPerTramo || 4;
   mix = normalizeMix(p.mix);
   // Sampler: re-decodifica los samples guardados en buffers de audio
   samples = {}; sampleBuffers = {};
@@ -212,6 +228,7 @@ function newProject() {
   projectName = "Mi track";
   mix = defaultMix();
   samples = {}; sampleBuffers = {};
+  patterns = [blankPattern()]; current = 0; pattern = patterns[0];
   if ($("projName")) $("projName").value = projectName;
   generate(); // patrón nuevo
   markDirty();
@@ -246,6 +263,61 @@ function clearSample(id) {
   live = null;
   renderGrid(); markDirty();
   setStatus(`Pista <b>${id}</b> vuelve a la síntesis.`);
+}
+
+// --- Tramos (secciones): crea y encadena partes para montar el track ---
+function selectTramo(i) {
+  if (i < 0 || i >= patterns.length) return;
+  current = i; pattern = patterns[current];
+  built = null; refreshSong(); renderGrid(); markDirty();
+  setStatus(`Editando <b>Tramo ${i + 1}</b> de ${patterns.length}.`);
+}
+function addTramo() { // copia el actual para seguir creando rápido una variación
+  patterns.splice(current + 1, 0, deepCopy(pattern));
+  current += 1; pattern = patterns[current];
+  built = null; refreshSong(); renderGrid(); markDirty();
+  setStatus(`<b>Tramo ${current + 1}</b> creado (copia). Edítalo y pulsa ➕ para el siguiente.`);
+}
+function newIdeaTramo() { // tramo nuevo con una idea generada desde cero
+  patterns.splice(current + 1, 0, blankPattern());
+  current += 1; pattern = patterns[current];
+  generate(); // genera la idea en el tramo nuevo (sincroniza y redibuja)
+  setStatus(`<b>Tramo ${current + 1}</b> con idea nueva. Sigue creando.`);
+}
+function deleteTramo(i) {
+  if (patterns.length <= 1) { setStatus("Necesitas al menos un tramo."); return; }
+  patterns.splice(i, 1);
+  current = Math.max(0, Math.min(current, patterns.length - 1));
+  pattern = patterns[current];
+  built = null; refreshSong(); renderGrid(); markDirty();
+}
+
+function renderTramos() {
+  const bar = $("tramos"); if (!bar) return;
+  bar.innerHTML = "";
+  patterns.forEach((_, i) => {
+    const chip = document.createElement("button");
+    chip.className = "tramo" + (i === current ? " active" : "");
+    chip.textContent = "Tramo " + (i + 1);
+    chip.onclick = () => selectTramo(i);
+    bar.appendChild(chip);
+  });
+  if (patterns.length > 1) {
+    const del = document.createElement("button");
+    del.className = "tramo-del"; del.textContent = "🗑"; del.title = "Borrar el tramo activo";
+    del.onclick = () => deleteTramo(current);
+    bar.appendChild(del);
+  }
+  const add = document.createElement("button");
+  add.className = "tramo-add"; add.textContent = "➕ Nuevo tramo";
+  add.title = "Crea el siguiente tramo (copia del actual) para seguir";
+  add.onclick = addTramo;
+  bar.appendChild(add);
+  const fresh = document.createElement("button");
+  fresh.className = "tramo-add fresh"; fresh.textContent = "🎲 Idea nueva";
+  fresh.title = "Crea un tramo con una idea generada desde cero";
+  fresh.onclick = newIdeaTramo;
+  bar.appendChild(fresh);
 }
 
 function rootPc()  { return parseInt($("root").value, 10); }
@@ -334,6 +406,7 @@ function generate() {
   cand.slice(0, count).forEach((s) => { if (p.stab[s] == null) p.stab[s] = chordAt(progAt(s), 48, seventh); });
 
   pattern = p;
+  syncTramo();
   built = null;
   // Si no está sonando, fuerza recrear las voces (para que el cambio de estilo
   // — p.ej. el bajo reese — se aplique en la siguiente reproducción).
@@ -361,6 +434,7 @@ function regenTrack(id) {
   const fresh = pattern[id];
   pattern = before;
   pattern[id] = fresh;
+  syncTramo();
   built = null;
   refreshSong();
   renderGrid();
@@ -402,39 +476,20 @@ function mutate(p) {
 // ----------------------------------------------------------------------------
 // Arreglo automático: convierte el bucle base en un track completo
 // ----------------------------------------------------------------------------
+// Monta el track encadenando TUS tramos en orden (cada uno dura barsPerTramo).
 function buildSong() {
   const song = { kick: [], clap: [], chat: [], ohat: [], bass: [], stab: [] };
   const sections = [];
-  const fx = [];
-  const variants = { A: pattern, B: mutate(pattern) };
   let barCursor = 0;
 
-  for (const sec of ARRANGEMENT) {
-    const keepAll = sec.keep === "all";
-    const keep = (id) => keepAll || sec.keep.includes(id);
-    const src = variants[sec.variant || "A"];
-    const startStep = barCursor * STEPS;
-
-    for (let b = 0; b < sec.bars; b++) {
-      const lastBar = b === sec.bars - 1;
-      for (let s = 0; s < STEPS; s++) {
-        const roll = sec.fillLast && lastBar; // fill de hats en el último compás
-        song.kick.push(keep("kick") ? src.kick[s] : false);
-        song.clap.push(keep("clap") ? src.clap[s] : false);
-        song.chat.push(roll ? true : (keep("chat") ? src.chat[s] : false));
-        song.ohat.push(keep("ohat") ? src.ohat[s] : false);
-        song.bass.push(keep("bass") ? src.bass[s] : null);
-        song.stab.push(keep("stab") ? src.stab[s] : null);
-      }
-    }
-
-    sections.push({ name: sec.name, startBar: barCursor, bars: sec.bars });
-    if (sec.impactFirst)    fx.push({ step: startStep, type: "impact" });
-    if (sec.riserLast)      fx.push({ step: (barCursor + sec.bars - 1) * STEPS, type: "riser" });
-    if (sec.downlifterLast) fx.push({ step: (barCursor + sec.bars - 1) * STEPS, type: "downlifter" });
-    barCursor += sec.bars;
-  }
-  return { song, sections, fx };
+  patterns.forEach((pat, i) => {
+    for (let b = 0; b < barsPerTramo; b++)
+      for (let s = 0; s < STEPS; s++)
+        for (const k of Object.keys(song)) song[k].push(pat[k][s]);
+    sections.push({ name: "Tramo " + (i + 1), startBar: barCursor, bars: barsPerTramo });
+    barCursor += barsPerTramo;
+  });
+  return { song, sections, fx: [] };
 }
 
 function refreshSong() {
@@ -653,8 +708,8 @@ function toggleMode() {
   $("modeBtn").textContent = mode === "song" ? "🎚️ Track" : "🔁 Bucle";
   renderTimeline();
   setStatus(mode === "song"
-    ? "Modo <b>Track completo</b>: Intro · Build · Drop · Break · Drop 2 · Outro."
-    : "Modo <b>Bucle</b>: un compás que se repite.");
+    ? `Modo <b>Track</b>: suenan tus ${patterns.length} tramo(s) en orden (${barsPerTramo} comp. c/u).`
+    : "Modo <b>Bucle</b>: se repite el tramo activo.");
   if (wasPlaying) play();
   markDirty();
 }
@@ -820,6 +875,7 @@ function renderGrid() {
     grid.appendChild(row);
   }
   renderMixer();
+  renderTramos();
 }
 
 // --- Mezclador (zona propia, con channel strips estilo estudio) ---

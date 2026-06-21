@@ -162,6 +162,35 @@ button.primary.playing { background: var(--accent-2); border-color: var(--accent
   font-weight: 700;
 }
 
+/* Barra de Tramos (secciones del track) */
+.tramos {
+  display: flex;
+  gap: 8px;
+  padding: 10px 20px 0;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.tramos .tramo {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.tramos .tramo.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.tramos .tramo-del {
+  background: transparent; border: 1px solid var(--line); border-radius: 8px;
+  padding: 7px 10px; font-size: 12px; cursor: pointer;
+}
+.tramos .tramo-add {
+  background: transparent; border: 1px dashed var(--line); border-radius: 8px;
+  padding: 7px 12px; font-size: 12px; color: var(--muted); cursor: pointer;
+}
+.tramos .tramo-add:hover { border-color: var(--accent); color: var(--text); }
+.tramos .tramo-add.fresh { border-color: var(--accent-2); color: var(--accent-2); }
+
 /* Zona Mezclador: channel strips */
 .mixer {
   display: flex;

@@ -56,7 +56,11 @@ masterizar con asistencia, y dejar el toque final al productor.
 - ✅ **UI con lógica de estudio**: zonas (Secuenciador · Mezclador), channel strips
   con fader vertical + lectura en dB + **medidores de nivel** (Tone.Meter) + strip
   de Máster; estado de transporte actualizado al reproducir.
-- 🔜 Timeline de **clips** multipista (varios patrones encadenados, no 1 compás).
+- ✅ **Tramos (secciones)**: crea varias partes (➕ copia / 🎲 idea nueva), cámbialas
+  con chips y se encadenan en orden en modo Track. Montas el track parte a parte.
+- ✅ **Sampler**: carga audio real (.wav/.mp3) por pista de batería; reemplaza la
+  síntesis (Tone.Player). El sample viaja en el `.tfp`.
+- 🔜 Duración por tramo configurable + reordenar arrastrando.
 - 🔜 EQ/compresor por canal y envíos a FX (reverb/delay) compartidos.
 
 ## 🎚️ Fase 2 — Mezcla y mastering (en marcha)
