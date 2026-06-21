@@ -9,6 +9,27 @@ Sin instalar nada, sin cuentas y sin costes.
 
 ---
 
+## 🖥️ Abrirlo en localhost (servidor local)
+
+Si prefieres servirlo en `http://localhost` en lugar de abrir el archivo
+directamente, levanta un mini-servidor con **Python** (no requiere instalar
+dependencias del proyecto):
+
+1. Abre una terminal **en la carpeta del proyecto**:
+   - **Windows**: en el Explorador, haz clic en la barra de la ruta, escribe
+     `powershell` y pulsa Enter.
+   - **Mac**: clic derecho en la carpeta → *Servicios* → *Nuevo terminal en la carpeta*.
+2. Arranca el servidor:
+   - **Windows**: `py -m http.server 8000`
+   - **Mac/Linux**: `python3 -m http.server 8000`
+3. Abre el navegador en 👉 **http://localhost:8000**
+4. Para pararlo: vuelve a la terminal y pulsa `Ctrl + C`.
+
+> Alternativa con **VS Code**: instala la extensión *Live Server*, abre la
+> carpeta, clic derecho en `index.html` → *Open with Live Server*.
+
+---
+
 ## ▶️ Cómo usarlo (no hace falta saber programar)
 
 1. Descarga este proyecto y haz **doble clic en `index.html`**. Se abre en tu
