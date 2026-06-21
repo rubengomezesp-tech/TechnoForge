@@ -12,6 +12,8 @@ const SCALES = {
   minor:    [0, 2, 3, 5, 7, 8, 10],
   phrygian: [0, 1, 3, 5, 7, 8, 10],
   dorian:   [0, 2, 3, 5, 7, 9, 10],
+  ionian:   [0, 2, 4, 5, 7, 9, 11], // mayor — luminosa
+  lydian:   [0, 2, 4, 6, 7, 9, 11], // asombro / grandeza
 };
 
 const TRACKS = [
@@ -23,12 +25,26 @@ const TRACKS = [
   { id: "stab", name: "Stab",  type: "pitch" },
 ];
 
-// Cada estilo sesga la generación del patrón
+// Cada estilo sesga la generación del patrón (carácter rítmico/percusivo)
 const STYLE_PARAMS = {
   peaktime:   { hat: 0.50, stab: 2, bass: 0.70, seventh: false },
   hypnotic:   { hat: 0.42, stab: 1, bass: 0.85, seventh: false },
   melodic:    { hat: 0.40, stab: 3, bass: 0.60, seventh: true  },
   industrial: { hat: 0.70, stab: 1, bass: 0.72, seventh: false },
+};
+
+// Motor de Armonía Emocional: cada emoción fija una escala y una PROGRESIÓN
+// (grados de la escala, un acorde por tiempo) + sesgos. Aquí vive la traducción
+// "sentimiento → armonía" (ver docs/VISION.md). prog = grados 0-índice del acorde.
+const EMOTIONS = {
+  melancolia: { scale: "minor",    prog: [0, 5, 3, 4], seventh: true,  energy: 40, label: "Melancolía" }, // i–VI–iv–v
+  esperanza:  { scale: "ionian",   prog: [0, 4, 5, 3], seventh: false, energy: 55, label: "Esperanza"  }, // I–V–vi–IV
+  epica:      { scale: "minor",    prog: [0, 5, 6, 4], seventh: false, energy: 80, label: "Épica"      }, // i–VI–VII–v
+  oscuridad:  { scale: "phrygian", prog: [0, 1, 0, 5], seventh: false, energy: 55, label: "Oscuridad"  }, // i–bII–i–VI
+  nostalgia:  { scale: "dorian",   prog: [0, 3, 5, 4], seventh: true,  energy: 45, label: "Nostalgia"  }, // i–IV–VI–v
+  grandeza:   { scale: "lydian",   prog: [0, 4, 5, 1], seventh: true,  energy: 72, label: "Grandeza"   },
+  tension:    { scale: "phrygian", prog: [0, 4, 1, 4], seventh: false, energy: 88, label: "Tensión"    },
+  liberacion: { scale: "ionian",   prog: [0, 3, 4, 0], seventh: false, energy: 70, label: "Liberación" }, // I–IV–V–I
 };
 
 // Estructura del track (modo Track). keep = pistas activas; variant = qué
@@ -42,7 +58,8 @@ const ARRANGEMENT = [
   { name: "Outro",  bars: 4, keep: ["kick", "chat"] },
 ];
 
-let pattern = blankPattern(); // el bucle base (el "drop")
+let pattern;                  // el bucle base (el "drop") — inicializado abajo,
+                              // tras definir arr16/blankPattern (evita TDZ al cargar)
 let mutes = new Set();
 let mode = "loop";            // "loop" | "song"
 let built = null;             // { song, sections, fx } cuando hay track montado
@@ -60,6 +77,8 @@ function blankPattern() {
            ohat: arr16(false), bass: arr16(null), stab: arr16(null) };
 }
 
+pattern = blankPattern(); // ya con arr16 inicializado
+
 function rootPc()  { return parseInt($("root").value, 10); }
 function scaleId() { return $("scale").value; }
 function styleId() { return $("style").value; }
@@ -67,13 +86,33 @@ function bpm()     { return parseInt($("bpm").value, 10); }
 function energy()  { return parseInt($("energy").value, 10) / 100; }
 function swingAmt(){ return parseInt($("swing").value, 10) / 100; }
 
-function bassRoot() { return 24 + rootPc(); }
-function stabChord(seventh) {
-  const base = 48 + rootPc();
+function emotionId()     { return $("emotion").value; }
+function currentEmotion(){ return EMOTIONS[emotionId()] || EMOTIONS.melancolia; }
+function wantSeventh()   { return STYLE_PARAMS[styleId()].seventh || currentEmotion().seventh; }
+
+// Grado de la progresión que toca en el paso s (un acorde por tiempo = 4 pasos)
+function progAt(s) {
+  const pr = currentEmotion().prog;
+  return pr[Math.floor(s / 4) % pr.length];
+}
+
+// Semitono diatónico del grado d (admite grados >6: sube de octava)
+function scaleSemitone(d, sc) {
+  const i = ((d % 7) + 7) % 7;
+  return sc[i] + 12 * Math.floor(d / 7);
+}
+
+// Acorde (tríada / séptima) construido sobre el grado, en la octava base dada
+function chordAt(degree, octaveBase, seventh) {
   const sc = SCALES[scaleId()];
-  const chord = [base, base + sc[2], base + sc[4]]; // tríada de la tonalidad
-  if (seventh) chord.push(base + sc[6]);
-  return chord;
+  const tones = [degree, degree + 2, degree + 4];
+  if (seventh) tones.push(degree + 6);
+  return tones.map((d) => octaveBase + rootPc() + scaleSemitone(d, sc));
+}
+
+// Nota de bajo: la fundamental del acorde que toca en ese paso
+function bassNoteAt(s) {
+  return 24 + rootPc() + scaleSemitone(progAt(s), SCALES[scaleId()]);
 }
 
 // ----------------------------------------------------------------------------
@@ -83,6 +122,7 @@ function generate() {
   const e = energy();
   const sp = STYLE_PARAMS[styleId()];
   const sc = SCALES[scaleId()];
+  const em = currentEmotion();
   const p = blankPattern();
 
   // Bombo 4x4
@@ -104,21 +144,25 @@ function generate() {
     if (rnd() < dens) p.chat[s] = true;
   }
 
-  // Bajo rodante
-  const root = bassRoot();
-  const fifth = root + sc[4];
+  // Bajo rodante — la fundamental sigue el acorde de cada tiempo (la armonía se mueve)
   [2, 3, 6, 7, 10, 11, 14, 15].forEach((s) => {
     if (rnd() < clamp(sp.bass + e * 0.2, 0, 0.95)) {
+      const base = bassNoteAt(s);
+      const fifth = base + (scaleSemitone(progAt(s) + 4, sc) - scaleSemitone(progAt(s), sc));
       const r = rnd();
-      p.bass[s] = r > 0.85 ? root + 12 : r > 0.7 ? fifth : root;
+      p.bass[s] = r > 0.85 ? base + 12 : r > 0.7 ? fifth : base;
     }
   });
-  if (p.bass[2] == null) p.bass[2] = root;
+  if (p.bass[2] == null) p.bass[2] = bassNoteAt(2);
 
-  // Stabs / acordes sincopados
+  // Acordes: progresión emocional en los cuatro tiempos (columna armónica)…
+  const seventh = wantSeventh();
+  const prog = em.prog;
+  [0, 4, 8, 12].forEach((s, i) => (p.stab[s] = chordAt(prog[i % prog.length], 48, seventh)));
+  // …más stabs sincopados extra para groove (toman el acorde de su tiempo)
   const cand = shuffle([3, 7, 10, 11, 14]);
-  const count = clamp(sp.stab + Math.round(e), 1, cand.length);
-  cand.slice(0, count).forEach((s) => (p.stab[s] = stabChord(sp.seventh)));
+  const count = clamp(sp.stab - 1 + Math.round(e), 0, cand.length);
+  cand.slice(0, count).forEach((s) => { if (p.stab[s] == null) p.stab[s] = chordAt(progAt(s), 48, seventh); });
 
   pattern = p;
   built = null;
@@ -160,13 +204,12 @@ function deepCopy(p) {
 
 function mutate(p) {
   const m = deepCopy(p);
-  const sc = SCALES[scaleId()];
-  const root = bassRoot(), fifth = root + sc[4];
-  // Cambia algunas notas del bajo
+  // Cambia algunas notas del bajo, siempre dentro del acorde de ese tiempo
   for (let s = 0; s < STEPS; s++)
     if (m.bass[s] != null && rnd() < 0.3) {
+      const base = bassNoteAt(s);
       const r = rnd();
-      m.bass[s] = r > 0.6 ? root + 12 : r > 0.3 ? fifth : root;
+      m.bass[s] = r > 0.6 ? base + 12 : r > 0.3 ? base + 7 : base;
     }
   // Re-rolea un par de closed hats
   for (let i = 0; i < 3; i++) {
@@ -282,10 +325,14 @@ function buildVoices(opts = {}) {
     envelope: { attack: 0.005, decay: 0.2, sustain: 0.45, release: 0.12 },
   }).connect(musicalBus);
 
-  const stabFilter = new Tone.Filter(2200, "lowpass").connect(musicalBus);
+  // Acordes con reverb (Freeverb es algorítmico: válido también en render offline)
+  // para ese aire cinematográfico de melodic/progressive.
+  const stabVerb = new Tone.Freeverb({ roomSize: 0.62, dampening: 3000 }).connect(musicalBus);
+  stabVerb.wet.value = 0.28;
+  const stabFilter = new Tone.Filter(2200, "lowpass").connect(stabVerb);
   const stab = new Tone.PolySynth(Tone.Synth, {
     oscillator: { type: "sawtooth" }, volume: -14,
-    envelope: { attack: 0.004, decay: 0.18, sustain: 0, release: 0.1 },
+    envelope: { attack: 0.006, decay: 0.22, sustain: 0.05, release: 0.18 },
   }).connect(stabFilter);
 
   // FX (no pasan por el pump): riser e impacto
@@ -560,8 +607,8 @@ function renderGrid() {
 
 function toggleCell(t, s) {
   if (t.type === "drum") pattern[t.id][s] = !pattern[t.id][s];
-  else if (t.id === "bass") pattern.bass[s] = pattern.bass[s] == null ? bassRoot() : null;
-  else pattern.stab[s] = pattern.stab[s] == null ? stabChord(STYLE_PARAMS[styleId()].seventh) : null;
+  else if (t.id === "bass") pattern.bass[s] = pattern.bass[s] == null ? bassNoteAt(s) : null;
+  else pattern.stab[s] = pattern.stab[s] == null ? chordAt(progAt(s), 48, wantSeventh()) : null;
   built = null;
   refreshSong();
   renderGrid();
@@ -607,8 +654,19 @@ function init() {
   $("wavBtn").onclick = exportWav;
   $("stemsBtn").onclick = exportStems;
 
+  // La emoción fija escala + energía sugeridas y regenera (Motor de Armonía Emocional)
+  $("emotion").onchange = () => {
+    const em = currentEmotion();
+    $("scale").value = em.scale;
+    $("energy").value = em.energy;
+    $("energyOut").textContent = em.energy;
+    generate();
+  };
   // Cambiar tonalidad / escala / estilo regenera la idea para aplicarlos
   ["root", "scale", "style"].forEach((id) => ($(id).onchange = generate));
+
+  // Aplica la escala de la emoción por defecto antes del primer generate()
+  $("scale").value = currentEmotion().scale;
 
   const bindRange = (id) => {
     const el = $(id), out = $(id + "Out");

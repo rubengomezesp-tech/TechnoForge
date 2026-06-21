@@ -34,6 +34,15 @@ masterizar con asistencia, y dejar el toque final al productor.
 - Más motores de síntesis (808/909, bass reese, plucks) y FX (downlifters, sweeps).
 - Estructura de arreglo configurable por el usuario.
 
+### 💜 Motor de Armonía Emocional (primer paso hacia la VISIÓN)
+- ✅ Selector de **Emoción** (8 emociones) que fija escala + **progresión de
+  acordes** + sesgos; el bajo sigue las fundamentales; reverb en los acordes.
+- ✅ Escalas nuevas: mayor (ionian) y lidia para emociones luminosas.
+- 🔜 Progresiones multi-compás (que el track avance armónicamente entre secciones).
+- 🔜 Capa de **pad/cuerdas** sostenida bajo los acordes (alma cinematográfica).
+- 🔜 Editor de **Arco Emocional** (curva de tensión que gobierna el arreglo).
+- Plan completo en [`VISION.md`](VISION.md).
+
 ## 🎚️ Fase 2 — Mezcla y mastering (en marcha)
 
 - ✅ **Cadena de máster básica**: EQ (limpia graves / da aire) → glue compressor

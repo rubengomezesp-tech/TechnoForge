@@ -38,9 +38,14 @@ dependencias del proyecto):
 2. Pulsa **🎲 Generar idea**: aparece un patrón de techno completo.
 3. Pulsa **▶ Play** para escucharlo en bucle.
 4. Juega con los controles:
+   - **Emoción** 💜: lo más importante. Elige el *sentimiento* (Melancolía,
+     Esperanza, Épica, Oscuridad, Nostalgia, Grandeza, Tensión, Liberación) y la
+     app genera una **progresión de acordes** acorde a esa emoción, con el bajo
+     siguiendo la armonía. Es el *Motor de Armonía Emocional* (ver `docs/VISION.md`).
    - **BPM**: velocidad (el techno suele ir a 125–132).
    - **Tonalidad** y **Escala**: el "color" del bajo y los acordes (menor =
-     oscuro, frigia = aún más oscuro, dórica = más groovy).
+     oscuro, frigia = aún más oscuro, dórica = groovy, mayor = luminosa, lidia =
+     asombro). La emoción ya elige una escala; aquí puedes afinarla a mano.
    - **Energía**: cuánto relleno y densidad tiene el patrón.
    - **Swing**: ese "balanceo" que hace que no suene tan recto.
 5. **Estilo**: elige Peak-time, Hipnótico, Melódico o Industrial para cambiar el
@@ -74,7 +79,8 @@ dependencias del proyecto):
 - **Clap**: en los tiempos 2 y 4.
 - **Bajo**: rodante en las semicorcheas que no chocan con el bombo, en la
   tonalidad elegida, con saltos a la quinta y la octava.
-- **Stabs**: acordes (tríadas de la escala) en posiciones sincopadas.
+- **Stabs**: la **progresión de acordes** de la emoción (un acorde por tiempo, con
+  reverb cinematográfica), más stabs sincopados para el groove.
 - **Sidechain / "pump"**: el bajo y los acordes "respiran" con cada bombo,
   como en una producción real.
 
