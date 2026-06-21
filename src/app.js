@@ -64,6 +64,7 @@ let current = 0;              // índice del tramo que se edita
 let barsPerTramo = 4;         // duración por defecto de un tramo nuevo (compases)
 let tramoBars = [4];          // duración (compases) de cada tramo, en paralelo a patterns
 let tramoFx = ["none"];       // transición por tramo: none|riser|impact|drop
+let tramoVocal = [true];      // si la vocal suena en cada tramo (clips por sección)
 let mode = "loop";            // "loop" | "song"
 let built = null;             // { song, sections, fx } cuando hay track montado
 let currentStep = -1;
@@ -106,6 +107,7 @@ current = 0;
 pattern = patterns[0];
 tramoBars = [4];
 tramoFx = ["none"];
+tramoVocal = [true];
 
 // Mantiene pattern === patterns[current] tras reasignar pattern
 function syncTramo() { patterns[current] = pattern; }
@@ -393,6 +395,7 @@ function getProject() {
     barsPerTramo,
     tramoBars,
     tramoFx,
+    tramoVocal,
     mix,
     fxGlobal,
     synth,
@@ -434,6 +437,7 @@ function loadProject(p) {
   barsPerTramo = p.barsPerTramo || 4;
   tramoBars = patterns.map((_, i) => (p.tramoBars && p.tramoBars[i]) || barsPerTramo);
   tramoFx = patterns.map((_, i) => (p.tramoFx && p.tramoFx[i]) || "none");
+  tramoVocal = patterns.map((_, i) => (p.tramoVocal ? p.tramoVocal[i] !== false : true));
   mix = normalizeMix(p.mix);
   const g = p.fxGlobal || {};
   fxGlobal = { rumble: g.rumble || 0, masterGain: g.masterGain || 0, lufsTarget: g.lufsTarget || -9,
@@ -506,7 +510,7 @@ function newProject() {
   projectName = "Mi track";
   mix = defaultMix();
   samples = {}; sampleBuffers = {};
-  patterns = [blankPattern()]; current = 0; pattern = patterns[0]; tramoBars = [4]; tramoFx = ["none"];
+  patterns = [blankPattern()]; current = 0; pattern = patterns[0]; tramoBars = [4]; tramoFx = ["none"]; tramoVocal = [true];
   fxGlobal = { rumble: 0, masterGain: 0, lufsTarget: -9, lfo: { on: false, bars: 2, depth: 0.5 } };
   if ($("rumble")) { $("rumble").value = 0; $("rumbleOut").textContent = "0"; }
   renderModulation();
@@ -701,6 +705,12 @@ function selectTramo(i) {
 }
 function tramoBarsOf(i) { return tramoBars[i] || barsPerTramo; }
 function tramoFxOf(i) { return tramoFx[i] || "none"; }
+function tramoVocalOf(i) { return tramoVocal[i] !== false; }
+function setTramoVocal(v) {
+  tramoVocal[current] = v;
+  renderTramos(); markDirty();
+  setStatus(`Tramo ${current + 1}: vocal <b>${v ? "ON" : "OFF"}</b>.`);
+}
 function setTramoBars(n) {
   tramoBars[current] = n;
   built = null; refreshSong(); renderTramos(); resync(); markDirty();
@@ -716,6 +726,7 @@ function addTramo() { // copia el actual para seguir creando rápido una variaci
   patterns.splice(current + 1, 0, deepCopy(pattern));
   tramoBars.splice(current + 1, 0, tramoBarsOf(current));
   tramoFx.splice(current + 1, 0, "none");
+  tramoVocal.splice(current + 1, 0, tramoVocalOf(current));
   current += 1; pattern = patterns[current];
   built = null; refreshSong(); renderGrid(); resync(); markDirty();
   setStatus(`<b>Tramo ${current + 1}</b> creado (copia). Edítalo y pulsa ➕ para el siguiente.`);
@@ -724,13 +735,14 @@ function newIdeaTramo() { // tramo nuevo con una idea generada desde cero
   patterns.splice(current + 1, 0, blankPattern());
   tramoBars.splice(current + 1, 0, barsPerTramo);
   tramoFx.splice(current + 1, 0, "none");
+  tramoVocal.splice(current + 1, 0, true);
   current += 1; pattern = patterns[current];
   generate(); // genera la idea en el tramo nuevo (sincroniza y redibuja)
   setStatus(`<b>Tramo ${current + 1}</b> con idea nueva. Sigue creando.`);
 }
 function deleteTramo(i) {
   if (patterns.length <= 1) { setStatus("Necesitas al menos un tramo."); return; }
-  patterns.splice(i, 1); tramoBars.splice(i, 1); tramoFx.splice(i, 1);
+  patterns.splice(i, 1); tramoBars.splice(i, 1); tramoFx.splice(i, 1); tramoVocal.splice(i, 1);
   current = Math.max(0, Math.min(current, patterns.length - 1));
   pattern = patterns[current];
   built = null; refreshSong(); renderGrid(); resync(); markDirty();
@@ -778,6 +790,15 @@ function renderTramos() {
   [["none", "—"], ["riser", "↑ Subida"], ["impact", "💥 Impacto"], ["drop", "🔥 Drop"]].forEach(([v, t]) => { const o = document.createElement("option"); o.value = v; o.textContent = t; if (v === tramoFxOf(current)) o.selected = true; fxSel.appendChild(o); });
   fxSel.onchange = () => setTramoFx(fxSel.value);
   fxWrap.appendChild(fxSel); bar.appendChild(fxWrap);
+
+  // Vocal por tramo (solo si hay vocal cargada)
+  if (vocal && vocal.name) {
+    const vbtn = document.createElement("button");
+    vbtn.className = "mini" + (tramoVocalOf(current) ? " solo" : " muted");
+    vbtn.textContent = "🎤"; vbtn.title = "Vocal en este tramo (on/off)";
+    vbtn.onclick = () => setTramoVocal(!tramoVocalOf(current));
+    bar.appendChild(vbtn);
+  }
 }
 
 function rootPc()  { return parseInt($("root").value, 10); }
@@ -1020,6 +1041,7 @@ function buildVoices(opts = {}) {
     const eq = new Tone.EQ3({ low: m.low || 0, mid: m.mid || 0, high: m.high || 0 });
     const comp = new Tone.Compressor({ threshold: compThreshold(m.comp || 0), ratio: 4, attack: 0.01, release: 0.12 });
     const drive = new Tone.WaveShaper(makeDriveCurve(m.drive || 0));
+    drive.oversample = "2x"; // saturación más suave (carácter analógico)
     const crush = new Tone.BitCrusher(crushBits(m.crush || 0));
     const widener = new Tone.StereoWidener(m.width != null ? m.width : 0.5);
     const scGain = new Tone.Gain(1); // sidechain: baja por cada golpe de kick
@@ -1045,15 +1067,15 @@ function buildVoices(opts = {}) {
   fx.kick.scGain.connect(rumbleSend);
 
   // Pista de Vocal/Sample: loop sincronizado (playbackRate ajusta a N compases)
-  let vocalPlayer = null;
+  let vocalPlayer = null, vocalChannel = null;
   if (vocalBuffer && vocalBuffer.loaded) {
     const barSec = (60 / bpm()) * 4;
-    const vch = new Tone.Channel({ volume: vocal.vol || 0 });
-    vch.mute = opts.flatMix ? false : !!vocal.mute;
-    vch.connect(master);
+    vocalChannel = new Tone.Channel({ volume: vocal.vol || 0 });
+    vocalChannel.mute = opts.flatMix ? false : !!vocal.mute;
+    vocalChannel.connect(master);
     vocalPlayer = new Tone.Player({ url: vocalBuffer, loop: true });
     vocalPlayer.playbackRate = Math.max(0.05, vocalBuffer.duration / ((vocal.bars || 4) * barSec));
-    vocalPlayer.connect(vch);
+    vocalPlayer.connect(vocalChannel);
   }
 
   // Sampler: si una pista de batería tiene sample cargado, su reproductor
@@ -1094,6 +1116,7 @@ function buildVoices(opts = {}) {
     envelope: { attack: bs.attack, decay: bs.decay, sustain: bs.sustain, release: bs.release },
   }).connect(ch.bass);
   bass.portamento = bs.slide || 0; // glide entre notas (acid)
+  bass.detune.value = (Math.random() * 6) - 3; // ligero drift analógico (±3 cents)
 
   // Acordes: sinte editable (synth.stab) + reverb. Motor Saw o FM (stabs metálicos)
   const st = synth.stab;
@@ -1150,6 +1173,7 @@ function buildVoices(opts = {}) {
     fx,          // rack de FX por canal (drive/sidechain/envíos)
     rumbleSend,  // envío al sub-rumble (techno)
     vocalPlayer, // reproductor de la pista de vocal/loop
+    vocalChannel, // canal de la vocal (mute por tramo)
     masterGainNode, // ganancia de máster (mastering/LUFS)
     masterLfo,   // LFO del auto-filtro de máster
     analyser,    // analizador de espectro (FFT) de la salida
@@ -1790,6 +1814,8 @@ function highlightSection(g) {
   // Resalta también el chip del tramo que suena (sin cambiar el que editas)
   document.querySelectorAll("#tramos .tramo").forEach((el, i) =>
     el.classList.toggle("playing", i === idx));
+  // Vocal por tramo: suena solo en los tramos con vocal activa
+  if (live && live.vocalChannel) live.vocalChannel.mute = vocal.mute || !tramoVocalOf(idx);
 }
 
 function highlight(s) {
