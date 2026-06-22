@@ -50,10 +50,15 @@
 
 * { box-sizing: border-box; }
 
-html { -webkit-text-size-adjust: 100%; }
+html { height: 100%; -webkit-text-size-adjust: 100%; }
 
 body {
   margin: 0;
+  min-height: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   background:
     radial-gradient(1200px 600px at 80% -10%, #14171f 0%, transparent 60%),
     var(--bg);
@@ -124,10 +129,11 @@ button.accent:hover {
 
 /* ----------------------------------------------------------------- Topbar -- */
 .topbar {
-  position: sticky; top: 0; z-index: var(--z-sticky);
+  position: relative; z-index: var(--z-sticky);
+  flex: 0 0 auto;
   display: flex; align-items: center; justify-content: space-between;
-  gap: var(--s-4);
-  padding: 12px var(--s-5);
+  gap: var(--s-3);
+  padding: 9px var(--s-4);
   background: color-mix(in srgb, var(--surface-2) 88%, transparent);
   backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--line);
@@ -140,6 +146,48 @@ button.accent:hover {
 .transport { display: flex; gap: var(--s-2); flex-wrap: wrap; }
 .spectrum { width: 200px; height: 34px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface-1); }
 .position { font-family: var(--mono); font-size: 15px; font-weight: 700; color: var(--accent-2); font-variant-numeric: tabular-nums; letter-spacing: .5px; min-width: 58px; text-align: center; }
+
+/* --------------------------------------------------------------- App shell */
+.daw-shell {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 292px minmax(520px, 1fr) 332px;
+  grid-template-rows: minmax(0, 1fr) 210px;
+  grid-template-areas:
+    "browser arrangement inspector"
+    "device  device      inspector";
+  background: var(--bg);
+}
+.daw-browser {
+  grid-area: browser;
+  min-width: 0; min-height: 0;
+  overflow: hidden;
+  background: var(--surface-1);
+  border-right: 1px solid var(--line);
+}
+.daw-arrangement {
+  grid-area: arrangement;
+  min-width: 0; min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: #0b0c10;
+}
+.daw-inspector {
+  grid-area: inspector;
+  min-width: 0; min-height: 0;
+  overflow: auto;
+  background: var(--surface-1);
+  border-left: 1px solid var(--line);
+}
+.daw-device-panel {
+  grid-area: device;
+  min-width: 0; min-height: 0;
+  overflow: auto;
+  background: var(--surface-1);
+  border-top: 1px solid var(--line);
+}
 
 /* ------------------------------------------------------------- Proyecto --- */
 .projectbar {
@@ -320,6 +368,154 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px 
 }
 .browser-quick button { min-width: 0; padding: 8px 9px; font-size: 12px; }
 
+.daw-browser .studio-browser {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-2);
+  background: transparent;
+  border-bottom: 0;
+}
+.daw-browser .browser-library {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.daw-browser .browser-rack {
+  display: none;
+}
+.daw-browser .browser-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  grid-template-columns: 1fr;
+}
+.daw-browser .browser-cats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  overflow: visible;
+}
+.daw-browser .browser-cat { padding: 5px 7px; font-size: 10.5px; }
+.daw-browser .browser-row { min-height: 44px; padding: 7px 8px; }
+.daw-browser .browser-quick { grid-template-columns: 1fr; }
+
+.daw-arrangement .projectbar,
+.daw-arrangement .controls {
+  flex: 0 0 auto;
+  padding: 8px 10px;
+  gap: 8px 10px;
+}
+.daw-arrangement .projectbar input[type="text"] {
+  min-width: 132px;
+  max-width: 220px;
+}
+.daw-arrangement .controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
+  align-items: end;
+}
+.daw-arrangement .controls label,
+.daw-arrangement .controls select,
+.daw-arrangement .controls input[type="range"] {
+  min-width: 0;
+  width: 100%;
+}
+.daw-arrangement .timeline,
+.daw-arrangement .automation,
+.daw-arrangement .tramos,
+.daw-arrangement .editmode,
+.daw-arrangement .vocal,
+.daw-arrangement .grid {
+  padding-left: 10px;
+  padding-right: 10px;
+}
+.daw-arrangement .timeline {
+  flex: 0 0 auto;
+  padding-top: 8px;
+}
+.daw-arrangement .automation {
+  display: none;
+}
+.daw-arrangement > .zone-title {
+  flex: 0 0 auto;
+}
+.daw-arrangement .tramos {
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding-top: 6px;
+  padding-bottom: 2px;
+}
+.daw-arrangement .tramos .tramo,
+.daw-arrangement .tramos .tramo-del,
+.daw-arrangement .tramos .tramo-add,
+.daw-arrangement .tramos .tramo-len {
+  flex: 0 0 auto;
+}
+.daw-arrangement .tramos .tramo,
+.daw-arrangement .tramos .tramo-add {
+  padding: 6px 10px;
+}
+.daw-arrangement .tramos .tramo-len {
+  margin-left: 0;
+}
+.daw-arrangement .editmode,
+.daw-arrangement .vocal {
+  flex: 0 0 auto;
+}
+.daw-arrangement .grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+.daw-arrangement .zone-title {
+  margin: 12px 10px 6px;
+}
+
+.daw-inspector .prodesk {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-2);
+}
+.daw-inspector .pro-brief,
+.daw-inspector .pro-macros {
+  border-radius: var(--r-md);
+  padding: var(--s-3);
+}
+.daw-inspector .macro-grid {
+  grid-template-columns: 1fr;
+}
+.daw-inspector .pro-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.daw-inspector .pro-actions button {
+  min-width: 0;
+  padding: 7px 8px;
+}
+
+.daw-device-panel .zone-title {
+  margin: 8px 10px;
+}
+.daw-device-panel .piano,
+.daw-device-panel .instruments,
+.daw-device-panel .vocal,
+.daw-device-panel .mixer,
+.daw-device-panel .chanfx {
+  padding-left: 10px;
+  padding-right: 10px;
+}
+.daw-device-panel .mixer {
+  padding-top: 6px;
+  padding-bottom: 8px;
+}
+.daw-device-panel .chanfx {
+  padding-bottom: 10px;
+}
+
 /* ----------------------------------------------------------- Títulos zona -- */
 .zone-title {
   margin: var(--s-5) var(--s-5) var(--s-2);
@@ -443,6 +639,31 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px 
 .step.on.note { background: var(--accent-2); border-color: var(--accent-2); }
 .step.playhead { outline: 2px solid var(--ink); outline-offset: -2px; }
 
+.daw-arrangement .grid {
+  gap: 6px;
+  padding-top: 10px;
+}
+.daw-arrangement .track {
+  grid-template-columns: 168px minmax(520px, 1fr);
+  gap: 8px;
+  border-radius: var(--r-sm);
+  padding: 6px 8px;
+}
+.daw-arrangement .track-head .mini {
+  padding: 3px 6px;
+  font-size: 10px;
+}
+.daw-arrangement .track-id {
+  min-width: 48px;
+}
+.daw-arrangement .track-head .name {
+  font-size: 12.5px;
+}
+.daw-arrangement .step {
+  border-radius: 3px;
+  min-height: 28px;
+}
+
 /* ------------------------------------------------------------ Instrumentos - */
 .instruments { display: flex; gap: var(--s-4); padding: var(--s-3) var(--s-5); flex-wrap: wrap; }
 .instr {
@@ -531,9 +752,11 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px 
 
 /* ---------------------------------------------------------------- Estado --- */
 .statusbar {
+  flex: 0 0 auto;
   display: flex; align-items: center; gap: var(--s-4);
-  padding: 11px var(--s-5);
-  margin-top: var(--s-2);
+  min-height: 34px;
+  padding: 8px 12px;
+  margin-top: 0;
   background: var(--surface-2);
   border-top: 1px solid var(--line);
   font-size: 12.5px; color: var(--ink-2);
@@ -542,6 +765,42 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px 
 .statusbar .help { margin-left: auto; color: var(--muted); font-size: 11.5px; text-align: right; }
 
 /* ------------------------------------------------------------- Responsive -- */
+@media (max-width: 1200px) {
+  .daw-shell {
+    grid-template-columns: 248px minmax(480px, 1fr) 292px;
+  }
+  .daw-arrangement .track {
+    grid-template-columns: 142px minmax(420px, 1fr);
+  }
+  .brand .tag { display: none; }
+}
+
+@media (max-width: 920px) {
+  body {
+    height: auto;
+    min-height: 100%;
+    overflow: auto;
+  }
+  .daw-shell {
+    display: flex;
+    flex-direction: column;
+    min-height: auto;
+  }
+  .daw-browser,
+  .daw-arrangement,
+  .daw-inspector,
+  .daw-device-panel {
+    min-height: auto;
+    max-height: none;
+    overflow: visible;
+    border-left: 0;
+    border-right: 0;
+  }
+  .daw-browser .studio-browser {
+    height: auto;
+  }
+}
+
 @media (max-width: 720px) {
   .topbar { align-items: center; gap: var(--s-3); padding: 10px var(--s-4); }
   .brand { align-items: center; }

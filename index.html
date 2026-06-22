@@ -47,6 +47,12 @@
     </div>
   </div>
 
+  <div class="daw-shell">
+    <aside class="daw-browser">
+      <section id="studioBrowser" class="studio-browser" aria-label="Browser de producción"><!-- presets, generadores y acciones por JS --></section>
+    </aside>
+
+    <main class="daw-arrangement">
   <section class="projectbar">
     <span class="pb-label">Proyecto</span>
     <input id="projName" type="text" value="Mi track" maxlength="60" />
@@ -147,10 +153,6 @@
     </label>
   </section>
 
-  <section id="studioBrowser" class="studio-browser" aria-label="Browser de producción"><!-- presets, generadores y acciones por JS --></section>
-
-  <section id="prodesk" class="prodesk"><!-- briefing, macros y asistente pro por JS --></section>
-
   <section id="timeline" class="timeline"><!-- estructura del track (modo Track) --></section>
   <section id="automation" class="automation"><!-- automatización visible por tramo --></section>
 
@@ -163,8 +165,14 @@
     <button type="button" class="seg" data-mode="ratchet">Ratchet</button>
   </div>
   <section id="vocal" class="vocal"><!-- pista de vocal/sample por JS --></section>
-  <main id="grid" class="grid"><!-- las pistas se dibujan por JS --></main>
+  <section id="grid" class="grid"><!-- las pistas se dibujan por JS --></section>
+    </main>
 
+    <aside class="daw-inspector">
+      <section id="prodesk" class="prodesk"><!-- briefing, macros y asistente pro por JS --></section>
+    </aside>
+
+    <section class="daw-device-panel">
   <h2 class="zone-title" data-collapsible data-open="false">Piano roll · Bajo</h2>
   <section id="piano" class="piano"><!-- melodías libres del bajo por JS --></section>
 
@@ -177,6 +185,8 @@
   <h2 class="zone-title" data-collapsible data-open="true">Mezclador</h2>
   <section id="mixer" class="mixer"><!-- channel strips por JS --></section>
   <section id="chanfx" class="chanfx"><!-- efectos del canal seleccionado por JS --></section>
+    </section>
+  </div>
 
   <footer class="statusbar">
     <span id="status">Listo. Pulsa <b>Generar idea</b> y luego <b>Play</b>.</span>
