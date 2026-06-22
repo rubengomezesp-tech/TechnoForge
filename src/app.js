@@ -749,8 +749,9 @@ async function createWithAI() {
     const plan = await requestAIPlan(payload);
     applyAIPlan(plan, { resume: wasPlaying });
   } catch (err) {
-    setStatus(`IA no disponible: <b>${escapeHTML(err.message)}</b>. He creado una versión local para no romper la sesión.`);
+    const reason = escapeHTML(err.message);
     applyBrief(true);
+    setStatus(`IA no disponible: <b>${reason}</b>. He creado una versión local para no romper la sesión.`);
     if (wasPlaying) setTimeout(() => play(), 100);
   } finally {
     aiRequestActive = false;
