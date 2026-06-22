@@ -16,20 +16,32 @@
       <span class="tag">tu productor de techno en el navegador</span>
     </div>
     <div class="transport">
-      <button id="playBtn" class="primary">▶ Play</button>
-      <button id="genBtn">🎲 Generar idea</button>
-      <button id="modeBtn">🔁 Bucle</button>
-      <button id="midiBtn">⬇ MIDI</button>
-      <button id="wavBtn">⬇ WAV</button>
+      <button id="playBtn" class="primary" data-help="Reproduce o detiene el patrón. El audio arranca con tu primer clic (política del navegador).">▶ Play</button>
+      <button id="genBtn" data-help="Genera una idea nueva siguiendo las reglas del techno y el estilo elegido.">🎲 Generar idea</button>
+      <button id="modeBtn" data-help="Alterna entre Bucle (un compás que se repite) y Track completo (intro · build · drop · break · drop 2 · outro).">🔁 Bucle</button>
+      <button id="midiBtn" data-help="Exporta el patrón como MIDI multipista para abrirlo en tu DAW.">⬇ MIDI</button>
+      <button id="wavBtn" data-help="Renderiza y descarga el audio masterizado en WAV.">⬇ WAV</button>
+    </div>
+
+    <div class="master">
+      <div class="scope-wrap" data-help="Máster: muestra dónde vive cada sonido. Graves a la izquierda (kick/bass), agudos a la derecha (hats).">
+        <canvas id="scope" class="scope"></canvas>
+        <span class="scope-label" id="scopeName">Espectro</span>
+      </div>
+      <button id="scopeToggle" class="mini" data-help="Cambia entre analizador de espectro (FFT) y osciloscopio (forma de onda).">Onda</button>
+      <div class="master-meter" data-help="Nivel de salida del máster. Si llega arriba (rojo) estás clipeando.">
+        <i id="mMeterFill"></i>
+      </div>
+      <div class="clip" id="clip" data-help="Se enciende si el máster supera 0 dBFS (saturación digital). Baja la energía o los faders.">CLIP</div>
     </div>
   </header>
 
   <section class="controls">
-    <label>BPM
+    <label data-help="Tempo en pulsos por minuto. El techno suele vivir entre 125 y 138 BPM.">BPM
       <input id="bpm" type="range" min="118" max="140" value="128" />
       <output id="bpmOut">128</output>
     </label>
-    <label>Tonalidad
+    <label data-help="Nota raíz del tema. Define el centro tonal del bajo y los acordes.">Tonalidad
       <select id="root">
         <option value="9">A</option>
         <option value="11">B</option>
@@ -40,14 +52,14 @@
         <option value="7">G</option>
       </select>
     </label>
-    <label>Escala
+    <label data-help="La escala marca el color emocional: menor/frigia = oscuro, dórica = más groovy.">Escala
       <select id="scale">
         <option value="minor">Menor (oscuro)</option>
         <option value="phrygian">Frigia (muy oscuro)</option>
         <option value="dorian">Dórica (groovy)</option>
       </select>
     </label>
-    <label>Estilo
+    <label data-help="Sesga la generación: peak-time (pista), hipnótico (loop oscuro), melódico (acordes), industrial (crudo).">Estilo
       <select id="style">
         <option value="peaktime">Peak-time</option>
         <option value="hypnotic">Hipnótico</option>
@@ -55,11 +67,11 @@
         <option value="industrial">Industrial</option>
       </select>
     </label>
-    <label>Energía
+    <label data-help="Más energía = más densidad de hats, ghost-notes y stabs. La intensidad del patrón.">Energía
       <input id="energy" type="range" min="0" max="100" value="55" />
       <output id="energyOut">55</output>
     </label>
-    <label class="swing">Swing
+    <label class="swing" data-help="Swing: retrasa las semicorcheas pares para dar groove humano en lugar de cuadrícula rígida.">Swing
       <input id="swing" type="range" min="0" max="60" value="12" />
       <output id="swingOut">12</output>
     </label>
@@ -68,6 +80,10 @@
   <section id="timeline" class="timeline"><!-- estructura del track (modo Track) --></section>
 
   <main id="grid" class="grid"><!-- las pistas se dibujan por JS --></main>
+
+  <div id="helpbar" class="helpbar">
+    <span>Pasa el ratón por cualquier control para entender qué hace.</span>
+  </div>
 
   <footer class="statusbar">
     <span id="status">Listo. Pulsa <b>Generar idea</b> y luego <b>Play</b>.</span>

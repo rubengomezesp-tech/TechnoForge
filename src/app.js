@@ -14,14 +14,23 @@ const SCALES = {
   dorian:   [0, 2, 3, 5, 7, 9, 10],
 };
 
+// hue = color con significado: cálidos = percusión (rítmico), fríos = tonal.
+// role = qué aporta cada pista; help = explicación honesta para el novato.
 const TRACKS = [
-  { id: "kick", name: "Kick",  type: "drum" },
-  { id: "clap", name: "Clap",  type: "drum" },
-  { id: "chat", name: "Hats",  type: "drum" },
-  { id: "ohat", name: "Open",  type: "drum" },
-  { id: "bass", name: "Bass",  type: "pitch" },
-  { id: "stab", name: "Stab",  type: "pitch" },
+  { id: "kick", name: "Kick", role: "pulso · 4×4",         type: "drum",  hue: 4,
+    help: "Bombo: el pulso 4×4, la base de todo. Dispara el sidechain (pump) sobre bajo y acordes." },
+  { id: "clap", name: "Clap", role: "backbeat · 2 y 4",    type: "drum",  hue: 26,
+    help: "Clap/palmada en los tiempos 2 y 4: marca el backbeat y abre el groove." },
+  { id: "chat", name: "Hats", role: "subdivisión · groove",type: "drum",  hue: 45,
+    help: "Charles cerrado: subdivide el compás. Su densidad y acentos dan el groove." },
+  { id: "ohat", name: "Open", role: "contratiempo · aire", type: "drum",  hue: 54,
+    help: "Charles abierto al contratiempo (offbeat): aire, oscuridad y empuje." },
+  { id: "bass", name: "Bass", role: "sub-grave · raíz",    type: "pitch", hue: 168,
+    help: "Bajo: ocupa el sub-grave, define la raíz y el movimiento armónico. Recibe el pump." },
+  { id: "stab", name: "Stab", role: "tensión armónica",    type: "pitch", hue: 205,
+    help: "Stab/acorde sincopado: aporta tensión y color armónico sobre el groove." },
 ];
+const trackColor = (t) => `hsl(${t.hue} 85% 60%)`;
 
 // Cada estilo sesga la generación del patrón
 const STYLE_PARAMS = {
@@ -42,18 +51,31 @@ const ARRANGEMENT = [
   { name: "Outro",  bars: 4, keep: ["kick", "chat"] },
 ];
 
+// Helpers (declarados antes de cualquier uso para evitar TDZ al inicializar estado).
+const $ = (id) => document.getElementById(id);
+const rnd = Math.random;
+const arr16 = (v) => Array.from({ length: STEPS }, () => v);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
 let pattern = blankPattern(); // el bucle base (el "drop")
 let mutes = new Set();
+let solos = new Set();        // Fase 5: aislar capas para aprender el tema
 let mode = "loop";            // "loop" | "song"
 let built = null;             // { song, sections, fx } cuando hay track montado
 let currentStep = -1;
 let seq = null;
 let live = null;
 
-const $ = (id) => document.getElementById(id);
-const rnd = Math.random;
-const arr16 = (v) => Array.from({ length: STEPS }, () => v);
-const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+// Estado de mezcla por pista (se aplica en vivo y en la exportación WAV).
+const mix = {};
+TRACKS.forEach((t) => (mix[t.id] = { vol: 1, pan: 0 }));
+
+// Una pista suena si no está muteada y, si hay algún solo activo, está soleada.
+const isAudible = (id) => !mutes.has(id) && (solos.size === 0 || solos.has(id));
+
+const reduceMotion =
+  typeof matchMedia === "function" &&
+  matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 function blankPattern() {
   return { kick: arr16(false), clap: arr16(false), chat: arr16(false),
@@ -246,22 +268,42 @@ function buildVoices() {
   const drumBus = new Tone.Gain(1).connect(master);
   const musicalBus = new Tone.Gain(1).connect(master); // recibe el "pump"
 
+  // --- Medición del máster: taps en paralelo (no consumen ni alteran la señal) ---
+  const masterMeter = new Tone.Meter({ normalRange: true, smoothing: 0.78 });
+  const fft = new Tone.Analyser("fft", 1024);
+  const wave = new Tone.Analyser("waveform", 1024);
+  limiter.connect(masterMeter);
+  limiter.connect(fft);
+  limiter.connect(wave);
+
+  // --- Channel strips por pista: gain (fader) → pan → meter → bus ---
+  // El meter es un paso-a-través: lee nivel sin alterar el audio (Fase 2).
+  const channels = {};
+  TRACKS.forEach((t) => {
+    const bus = t.type === "pitch" ? musicalBus : drumBus;
+    const meter = new Tone.Meter({ normalRange: true, smoothing: 0.7 });
+    const panner = new Tone.Panner(mix[t.id].pan).connect(meter);
+    const gain = new Tone.Gain(mix[t.id].vol).connect(panner);
+    meter.connect(bus);
+    channels[t.id] = { gain, panner, meter };
+  });
+
   const kick = new Tone.MembraneSynth({
     pitchDecay: 0.03, octaves: 6, oscillator: { type: "sine" },
     envelope: { attack: 0.001, decay: 0.34, sustain: 0, release: 0.02 },
-  }).connect(drumBus);
+  }).connect(channels.kick.gain);
 
-  const clapFilter = new Tone.Filter(1400, "bandpass").connect(drumBus);
+  const clapFilter = new Tone.Filter(1400, "bandpass").connect(channels.clap.gain);
   const clap = new Tone.NoiseSynth({
     noise: { type: "white" }, envelope: { attack: 0.002, decay: 0.18, sustain: 0 },
   }).connect(clapFilter);
 
-  const chatFilter = new Tone.Filter(8000, "highpass").connect(drumBus);
+  const chatFilter = new Tone.Filter(8000, "highpass").connect(channels.chat.gain);
   const chat = new Tone.NoiseSynth({
     noise: { type: "white" }, volume: -8, envelope: { attack: 0.001, decay: 0.03, sustain: 0 },
   }).connect(chatFilter);
 
-  const ohatFilter = new Tone.Filter(7000, "highpass").connect(drumBus);
+  const ohatFilter = new Tone.Filter(7000, "highpass").connect(channels.ohat.gain);
   const ohat = new Tone.NoiseSynth({
     noise: { type: "white" }, volume: -10, envelope: { attack: 0.001, decay: 0.2, sustain: 0 },
   }).connect(ohatFilter);
@@ -273,9 +315,9 @@ function buildVoices() {
     volume: -6, filter: { type: "lowpass", Q: 2 },
     filterEnvelope: { attack: 0.005, decay: 0.12, sustain: 0.2, release: 0.1, baseFrequency: 90, octaves: 2.6 },
     envelope: { attack: 0.005, decay: 0.2, sustain: 0.45, release: 0.12 },
-  }).connect(musicalBus);
+  }).connect(channels.bass.gain);
 
-  const stabFilter = new Tone.Filter(2200, "lowpass").connect(musicalBus);
+  const stabFilter = new Tone.Filter(2200, "lowpass").connect(channels.stab.gain);
   const stab = new Tone.PolySynth(Tone.Synth, {
     oscillator: { type: "sawtooth" }, volume: -14,
     envelope: { attack: 0.004, decay: 0.18, sustain: 0, release: 0.1 },
@@ -301,6 +343,8 @@ function buildVoices() {
   const midi = (m) => Tone.Frequency(m, "midi").toFrequency();
 
   return {
+    channels,                                   // { id: { gain, panner, meter } }
+    meters: { master: masterMeter, fft, wave }, // medición del máster
     kick: (t) => kick.triggerAttackRelease("C1", "8n", t),
     clap: (t) => { // dos golpes muy juntos = clap con más cuerpo
       clap.triggerAttackRelease("16n", t, 0.9);
@@ -332,16 +376,16 @@ function buildVoices() {
 }
 
 function triggerStep(v, p, s, time) {
-  if (p.kick[s] && !mutes.has("kick")) v.kick(time);
+  if (p.kick[s] && isAudible("kick")) v.kick(time);
   if (p.kick[s]) v.pump(time);
-  if (p.clap[s] && !mutes.has("clap")) v.clap(time);
-  if (p.chat[s] && !mutes.has("chat")) {
+  if (p.clap[s] && isAudible("clap")) v.clap(time);
+  if (p.chat[s] && isAudible("chat")) {
     const vel = (s % 4 === 0 ? 0.95 : 0.6) + rnd() * 0.1; // humanización
     v.chat(time, clamp(vel, 0, 1));
   }
-  if (p.ohat[s] && !mutes.has("ohat")) v.ohat(time);
-  if (p.bass[s] != null && !mutes.has("bass")) v.bass(time, p.bass[s]);
-  if (p.stab[s] != null && !mutes.has("stab")) v.stab(time, p.stab[s]);
+  if (p.ohat[s] && isAudible("ohat")) v.ohat(time);
+  if (p.bass[s] != null && isAudible("bass")) v.bass(time, p.bass[s]);
+  if (p.stab[s] != null && isAudible("stab")) v.stab(time, p.stab[s]);
 }
 
 // ----------------------------------------------------------------------------
@@ -366,12 +410,32 @@ async function play() {
     if (fxMap[g] === "riser") live.riser(time, barSec);
     if (fxMap[g] === "downlifter") live.downlifter(time, barSec);
     if (fxMap[g] === "impact") live.impact(time);
-    Tone.Draw.schedule(() => { highlight(g % STEPS); highlightSection(g); }, time);
+    // El dibujado se agenda en el INSTANTE en que suena (no al agendar):
+    // así el flash de cada celda coincide a oído con el golpe.
+    Tone.Draw.schedule(() => {
+      highlight(g % STEPS);
+      highlightSection(g);
+      flashHits(p, g);
+    }, time);
   }, [...Array(len).keys()], "16n").start(0);
 
   Tone.Transport.start();
+  startMeterLoop();
   $("playBtn").classList.add("playing");
   $("playBtn").textContent = "⏸ Stop";
+}
+
+// Flash de las celdas cuya pista acaba de sonar en este step (Fase 1).
+function flashHits(p, g) {
+  const col = g % STEPS;
+  for (const t of TRACKS) {
+    const fired = t.type === "drum" ? p[t.id][g] : p[t.id][g] != null;
+    if (!fired || !isAudible(t.id)) continue;
+    const cell = document.querySelector(
+      `.step[data-track="${t.id}"][data-step="${col}"]`
+    );
+    if (cell) { cell.classList.remove("hit"); void cell.offsetWidth; cell.classList.add("hit"); }
+  }
 }
 
 function stop() {
@@ -487,36 +551,99 @@ function encodeWav(audioBuffer) {
 function renderGrid() {
   const grid = $("grid");
   grid.innerHTML = "";
+  const soloing = solos.size > 0;
+
   for (const t of TRACKS) {
     const row = document.createElement("div");
-    row.className = "track";
+    row.className = "track"
+      + (mutes.has(t.id) || (soloing && !solos.has(t.id)) ? " dim" : "")
+      + (solos.has(t.id) ? " soloed" : "");
+    row.style.setProperty("--trk", trackColor(t));
+    row.dataset.help = t.help;
 
+    // --- cabecera / channel strip ---
     const head = document.createElement("div");
     head.className = "track-head";
-    head.innerHTML = `<span class="name">${t.name}</span>`;
+
+    const top = document.createElement("div");
+    top.className = "head-top";
+    top.innerHTML =
+      `<span class="chip"></span><span class="name">${t.name}</span><span class="role">${t.role}</span>`;
+
+    const ctrls = document.createElement("div");
+    ctrls.className = "head-ctrls";
+
     const m = document.createElement("button");
     m.className = "mini" + (mutes.has(t.id) ? " muted" : "");
-    m.textContent = "M"; m.title = "Silenciar";
+    m.textContent = "M"; m.dataset.help = `Silencia ${t.name}. Útil para oír el tema sin esta capa.`;
     m.onclick = () => { mutes.has(t.id) ? mutes.delete(t.id) : mutes.add(t.id); renderGrid(); };
-    const r = document.createElement("button");
-    r.className = "mini"; r.textContent = "🎲"; r.title = "Regenerar esta pista";
-    r.onclick = () => regenTrack(t.id);
-    head.append(m, r);
 
+    const so = document.createElement("button");
+    so.className = "mini" + (solos.has(t.id) ? " solo-on" : "");
+    so.textContent = "S"; so.dataset.help = `Solo: aísla ${t.name} para aprender qué aporta. Varios solos sumables.`;
+    so.onclick = () => { solos.has(t.id) ? solos.delete(t.id) : solos.add(t.id); renderGrid(); };
+
+    const r = document.createElement("button");
+    r.className = "mini"; r.textContent = "🎲";
+    r.dataset.help = `Regenera solo la pista ${t.name}, manteniendo el resto.`;
+    r.onclick = () => regenTrack(t.id);
+
+    ctrls.append(m, so, r);
+
+    const faders = document.createElement("div");
+    faders.className = "faders";
+    const vol = document.createElement("label");
+    vol.className = "fader vol";
+    vol.dataset.help = `Volumen de ${t.name} en la mezcla. Se aplica también al exportar WAV.`;
+    vol.innerHTML = `<span>Vol</span>`;
+    const volIn = document.createElement("input");
+    volIn.type = "range"; volIn.min = 0; volIn.max = 140; volIn.value = Math.round(mix[t.id].vol * 100);
+    volIn.oninput = () => setVol(t.id, volIn.value / 100);
+    vol.appendChild(volIn);
+
+    const pan = document.createElement("label");
+    pan.className = "fader pan";
+    pan.dataset.help = `Panorama de ${t.name}: izquierda ↔ derecha en el campo estéreo.`;
+    pan.innerHTML = `<span>Pan</span>`;
+    const panIn = document.createElement("input");
+    panIn.type = "range"; panIn.min = -100; panIn.max = 100; panIn.value = Math.round(mix[t.id].pan * 100);
+    panIn.oninput = () => setPan(t.id, panIn.value / 100);
+    pan.appendChild(panIn);
+
+    faders.append(vol, pan);
+    head.append(top, ctrls, faders);
+
+    // --- steps ---
     const steps = document.createElement("div");
     steps.className = "steps";
     for (let s = 0; s < STEPS; s++) {
       const cell = document.createElement("div");
       const on = t.type === "drum" ? pattern[t.id][s] : pattern[t.id][s] != null;
-      cell.className = "step" + (s % 4 === 0 ? " beat" : "") + (on ? " on" : "")
-                       + (on && t.type === "pitch" ? " note" : "");
+      cell.className = "step" + (s % 4 === 0 ? " beat" : "") + (on ? " on" : "");
       cell.dataset.track = t.id; cell.dataset.step = s;
       cell.onclick = () => toggleCell(t, s);
       steps.appendChild(cell);
     }
-    row.append(head, steps);
+
+    // --- medidor VU por canal (Fase 2) ---
+    const vu = document.createElement("div");
+    vu.className = "vu";
+    vu.dataset.help = `Nivel de ${t.name} en tiempo real. La marca blanca es el pico (peak-hold).`;
+    vu.innerHTML = `<i data-vu="${t.id}"></i><b data-peak="${t.id}"></b>`;
+
+    row.append(head, steps, vu);
     grid.appendChild(row);
   }
+}
+
+// --- Mezcla en vivo: actualiza los nodos sin recrear el grafo ---
+function setVol(id, v) {
+  mix[id].vol = v;
+  if (live && live.channels[id]) live.channels[id].gain.gain.rampTo(v, 0.02);
+}
+function setPan(id, p) {
+  mix[id].pan = p;
+  if (live && live.channels[id]) live.channels[id].panner.pan.rampTo(p, 0.02);
 }
 
 function toggleCell(t, s) {
@@ -558,6 +685,131 @@ function highlight(s) {
 function setStatus(html) { $("status").innerHTML = html; }
 
 // ----------------------------------------------------------------------------
+// Visualización en tiempo real (todo en requestAnimationFrame; lee, no agenda)
+// ----------------------------------------------------------------------------
+let rafId = null;
+let scopeMode = "spectrum"; // "spectrum" | "scope"
+let scopeCtx = null, scopeW = 0, scopeH = 0;
+const peakHold = {};   // pico por pista (cae suave)
+TRACKS.forEach((t) => (peakHold[t.id] = 0));
+let masterPeak = 0;
+
+function setupScope() {
+  const cv = $("scope");
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const rect = cv.getBoundingClientRect();
+  scopeW = Math.max(1, Math.round(rect.width));
+  scopeH = Math.max(1, Math.round(rect.height));
+  cv.width = scopeW * dpr;
+  cv.height = scopeH * dpr;
+  scopeCtx = cv.getContext("2d");
+  scopeCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+function startMeterLoop() {
+  if (rafId != null) return;
+  const loop = () => {
+    rafId = requestAnimationFrame(loop);
+    drawMeters();
+    drawScope();
+  };
+  loop();
+}
+
+function drawMeters() {
+  const decay = 0.025;
+  for (const t of TRACKS) {
+    let lvl = 0;
+    if (live && live.channels[t.id]) {
+      const v = live.channels[t.id].meter.getValue();
+      lvl = clamp(typeof v === "number" ? v : 0, 0, 1);
+    }
+    peakHold[t.id] = Math.max(lvl, peakHold[t.id] - decay);
+    const fill = document.querySelector(`[data-vu="${t.id}"]`);
+    const peak = document.querySelector(`[data-peak="${t.id}"]`);
+    if (fill) fill.style.height = (lvl * 100).toFixed(1) + "%";
+    if (peak) peak.style.bottom = (peakHold[t.id] * 100).toFixed(1) + "%";
+  }
+
+  // máster
+  let m = 0;
+  if (live && live.meters) {
+    const v = live.meters.master.getValue();
+    m = clamp(typeof v === "number" ? v : 0, 0, 1.5);
+  }
+  masterPeak = Math.max(m, masterPeak - 0.02);
+  const mFill = $("mMeterFill");
+  if (mFill) mFill.style.height = (clamp(m, 0, 1) * 100).toFixed(1) + "%";
+  const clipEl = $("clip");
+  if (clipEl) {
+    if (m >= 0.99) clipEl.classList.add("on");
+    else if (masterPeak < 0.7) clipEl.classList.remove("on");
+  }
+}
+
+function drawScope() {
+  if (!scopeCtx) return;
+  const ctx = scopeCtx;
+  ctx.clearRect(0, 0, scopeW, scopeH);
+  if (!live || !live.meters) return;
+
+  if (scopeMode === "spectrum") {
+    const data = live.meters.fft.getValue(); // dB, ~ -100..0
+    const bins = data.length;
+    const bars = 72;
+    const minDb = -90, maxDb = -12;
+    const barW = scopeW / bars;
+    for (let i = 0; i < bars; i++) {
+      // agrupación logarítmica: más resolución en graves
+      const lo = Math.floor(Math.pow(i / bars, 2) * bins);
+      const hi = Math.max(lo + 1, Math.floor(Math.pow((i + 1) / bars, 2) * bins));
+      let max = -Infinity;
+      for (let j = lo; j < hi && j < bins; j++) max = Math.max(max, data[j]);
+      const norm = clamp((max - minDb) / (maxDb - minDb), 0, 1);
+      const h = norm * scopeH;
+      const hue = 168 - (i / bars) * 168; // teal (graves) → rojo (agudos)
+      ctx.fillStyle = `hsl(${hue} 80% ${30 + norm * 30}%)`;
+      ctx.fillRect(i * barW, scopeH - h, Math.max(1, barW - 1), h);
+    }
+  } else {
+    const data = live.meters.wave.getValue(); // -1..1
+    const n = data.length;
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = "#18d3a7";
+    ctx.beginPath();
+    for (let i = 0; i < n; i++) {
+      const x = (i / (n - 1)) * scopeW;
+      const y = (0.5 - data[i] * 0.48) * scopeH;
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+}
+
+function toggleScope() {
+  scopeMode = scopeMode === "spectrum" ? "scope" : "spectrum";
+  $("scopeName").textContent = scopeMode === "spectrum" ? "Espectro" : "Osciloscopio";
+  $("scopeToggle").textContent = scopeMode === "spectrum" ? "Onda" : "Espectro";
+}
+
+// ----------------------------------------------------------------------------
+// Ayuda contextual (barra inferior estilo DAW)
+// ----------------------------------------------------------------------------
+const helpDefault = "Pasa el ratón por cualquier control para entender qué hace.";
+function bindHelp() {
+  const bar = $("helpbar").firstElementChild;
+  const show = (e) => {
+    const el = e.target.closest("[data-help]");
+    if (el) bar.innerHTML = el.dataset.help;
+  };
+  document.body.addEventListener("mouseover", show);
+  document.body.addEventListener("focusin", show);
+  document.body.addEventListener("mouseout", (e) => {
+    if (e.target.closest("[data-help]")) bar.innerHTML = helpDefault;
+  });
+}
+
+// ----------------------------------------------------------------------------
 // Arranque
 // ----------------------------------------------------------------------------
 function init() {
@@ -579,6 +831,12 @@ function init() {
     };
   };
   ["bpm", "energy", "swing"].forEach(bindRange);
+
+  $("scopeToggle").onclick = toggleScope;
+  setupScope();
+  window.addEventListener("resize", setupScope);
+  bindHelp();
+  startMeterLoop(); // medidores/espectro vivos incluso en silencio
 
   generate();
 }
