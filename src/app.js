@@ -31,6 +31,7 @@ const STYLE_PARAMS = {
   schranz:    { hat: 0.92, stab: 0, bass: 0.88, seventh: false },
   acid:       { hat: 0.66, stab: 1, bass: 0.96, seventh: false },
   raw:        { hat: 0.82, stab: 1, bass: 0.82, seventh: false },
+  afro:       { hat: 0.58, stab: 2, bass: 0.84, seventh: false },
   peaktime:   { hat: 0.50, stab: 2, bass: 0.70, seventh: false },
   hypnotic:   { hat: 0.42, stab: 1, bass: 0.85, seventh: false },
   melodic:    { hat: 0.40, stab: 3, bass: 0.60, seventh: true  },
@@ -376,6 +377,23 @@ const GENRE_PRESETS = {
       stab: { vol: -7, mid: 1, drive: 0.48, crush: 0.32, sidechain: 0.62, rev: 0.16, delay: 0.08 },
     },
   },
+  afro: {
+    bpm: 126, swing: 16, style: "afro", emotion: "oscuridad", energy: 74, rumble: 0.34,
+    lufsTarget: -8, masterGain: -1, lfo: { on: true, bars: 8, depth: 0.32 },
+    macros: { tension: 0.58, groove: 0.9, dirt: 0.36, space: 0.46 },
+    synth: {
+      bass: { wave: "sawtooth", cutoff: 118, res: 3.8, decay: 0.19, sustain: 0.38, release: 0.1, slide: 0.028 },
+      stab: { engine: "pluck", cutoff: 5200, res: 1.4, decay: 0.18, sustain: 0, release: 0.12 },
+    },
+    fx: {
+      kick: { vol: 3, low: 2, drive: 0.28, comp: 0.44 },
+      clap: { vol: -2, pan: -0.08, comp: 0.28, drive: 0.08, rev: 0.12 },
+      chat: { vol: -5, pan: -0.16, high: 3, comp: 0.18, width: 0.7, delay: 0.06 },
+      ohat: { vol: -4, pan: 0.22, high: 4, width: 0.82, rev: 0.16, delay: 0.08 },
+      bass: { vol: 1, low: -2, mid: 1, drive: 0.28, comp: 0.34, sidechain: 0.54 },
+      stab: { vol: -5, high: 2, drive: 0.12, sidechain: 0.46, rev: 0.34, delay: 0.18 },
+    },
+  },
   hard: {
     bpm: 140, swing: 6, style: "industrial", emotion: "oscuridad", rumble: 0.5,
     synth: { bass: { wave: "sawtooth", cutoff: 130, res: 4, slide: 0 }, stab: { engine: "saw", cutoff: 1800, res: 2 } },
@@ -467,6 +485,7 @@ function applyProMacros(regenerate = true) {
 
 function inferPresetFromBrief(text) {
   const b = (text || "").toLowerCase();
+  if (/afro|tribal|percus|organic|org[aá]nico|afro\s*tec|afro\s*tech/.test(b)) return "afro";
   if (/\bschranz\b|155|brutal|martillo/.test(b)) return "schranz";
   if (/\bacid\b|303|warehouse/.test(b)) return "acid";
   if (/\braw\b|industrial|distors|sucio|roto/.test(b)) return "raw";
@@ -519,6 +538,8 @@ function loadReferenceFile(file) {
 }
 
 function applyBrief(makeTrack = false) {
+  const wasPlaying = window.Tone && Tone.Transport && Tone.Transport.state === "started";
+  if (wasPlaying) stop();
   const input = $("proBrief");
   proBrief = input ? input.value : proBrief;
   const text = proBrief.toLowerCase();
@@ -538,8 +559,9 @@ function applyBrief(makeTrack = false) {
   if (bpmMatch) { setControlValue("bpm", bpmMatch[1]); if (window.Tone) Tone.Transport.bpm.value = parseInt(bpmMatch[1], 10); }
 
   applyProMacros(!makeTrack);
-  if (makeTrack) createProArrangement();
+  if (makeTrack) createProArrangement({ resume: wasPlaying });
   renderProDesk(); renderAutomation(); markDirty();
+  if (!makeTrack && wasPlaying) setTimeout(() => play(), 80);
 }
 
 function renderProDesk() {
@@ -559,7 +581,7 @@ function renderProDesk() {
   const trackBtn = document.createElement("button"); trackBtn.className = "accent"; trackBtn.textContent = "Crear track pro"; trackBtn.title = "Crea un arreglo completo desde el briefing o preset actual";
   trackBtn.onclick = () => applyBrief(true);
   const arrange = document.createElement("button"); arrange.textContent = "Arreglo pro"; arrange.title = "Convierte el patrón actual en un track con intro/build/drop/break/drop/outro";
-  arrange.onclick = createProArrangement;
+  arrange.onclick = () => createProArrangement();
   const master = document.createElement("button"); master.textContent = "Auto master"; master.title = "Mide loudness y ajusta el máster al objetivo";
   master.onclick = () => normalizeLoudness();
   const ref = document.createElement("button"); ref.textContent = "Referencia"; ref.title = "Analiza un WAV/MP3 local y ajusta macros sin copiar audio";
@@ -596,23 +618,26 @@ function renderProDesk() {
   el.append(brief, macros);
 }
 
-// Destruye el grafo de audio anterior (evita fuga de nodos que cuelgan la app:
-// BitCrushers en el hilo principal, reproductores de vocal apilados, LFOs…).
+const DEFERRED_DISPOSE_MS = 2600;
+function disposeNodeSafely(node, immediate = false) {
+  if (!node) return;
+  try { if (node.unsync) node.unsync(); } catch (e) {}
+  try { if (node.stop) node.stop(); } catch (e) {}
+  try { if (node.disconnect) node.disconnect(); } catch (e) {}
+  const dispose = () => { try { if (node.dispose) node.dispose(); } catch (e) {} };
+  if (immediate) dispose();
+  else setTimeout(dispose, DEFERRED_DISPOSE_MS);
+}
+
+// Desconecta el grafo anterior al instante y difiere dispose: Tone puede tener
+// releases/lookahead aún pendientes, y destruir el synth en caliente bloquea Chrome.
 function disposeLive() {
   if (!live) return;
   const nodes = live.nodes || [];
   for (let i = nodes.length - 1; i >= 0; i--) {
-    try {
-      const n = nodes[i];
-      if (n && n.unsync) n.unsync();
-      if (n && n.stop) n.stop();
-      if (n && n.dispose) n.dispose();
-      else if (n && n.disconnect) n.disconnect();
-    } catch (e) {}
+    disposeNodeSafely(nodes[i]);
   }
   try { if (live.out) live.out.disconnect(); } catch (e) {}
-  try { if (live.masterLfo) live.masterLfo.dispose(); } catch (e) {}
-  try { if (live.vocalPlayer) { live.vocalPlayer.unsync(); live.vocalPlayer.stop(); live.vocalPlayer.dispose(); } } catch (e) {}
 }
 function resetLive() { disposeLive(); live = null; }
 
@@ -624,6 +649,35 @@ function invalidateVoices() {
     live = buildVoices();
     buildSequence();
   }
+}
+
+function clearSequence() {
+  if (seq == null || !window.Tone || !Tone.Transport) return;
+  try {
+    if (seq && seq.dispose) seq.dispose();
+    else Tone.Transport.clear(seq);
+  } catch (e) {}
+  seq = null;
+}
+
+let playbackWatchdogT = null;
+function stopPlaybackWatchdog() {
+  clearTimeout(playbackWatchdogT);
+  playbackWatchdogT = null;
+}
+function startPlaybackWatchdog() {
+  stopPlaybackWatchdog();
+  playbackWatchdogT = setTimeout(() => {
+    if (!window.Tone || !Tone.Transport || Tone.Transport.state !== "started") return;
+    if (playbackStep > 0) return;
+    Tone.Transport.stop();
+    Tone.Transport.position = 0;
+    clearSequence();
+    playbackStep = 0;
+    buildSequence();
+    Tone.Transport.start("+0.03");
+    setStatus("Motor de audio reiniciado automáticamente. Si Chrome iba pesado, ya debería avanzar.");
+  }, 1100);
 }
 
 // Sintetizadores editables (subtractivo) para las pistas con tono
@@ -1204,6 +1258,36 @@ function bassNoteAt(s) {
   return 24 + rootPc() + scaleSemitone(progAt(s), SCALES[scaleId()]);
 }
 
+function applyAfroGroove(p) {
+  p.kick = arr16(false);
+  [0, 4, 8, 12].forEach((s) => (p.kick[s] = true));
+  [7, 15].forEach((s) => { p.kick[s] = true; p.mods.kick[s] = { p: 0.42, r: 1 }; });
+
+  p.clap = arr16(false);
+  [4, 12].forEach((s) => (p.clap[s] = true));
+  p.clap[14] = true; p.mods.clap[14] = { p: 0.48, r: 1 };
+
+  p.chat = arr16(false);
+  [1, 3, 5, 7, 9, 11, 13, 15].forEach((s) => (p.chat[s] = true));
+  [6, 10, 14].forEach((s) => { p.chat[s] = true; p.mods.chat[s] = { p: 0.72, r: 2 }; });
+
+  p.ohat = arr16(false);
+  [2, 6, 10, 14].forEach((s) => (p.ohat[s] = true));
+  p.mods.ohat[10] = { p: 0.76, r: 1 };
+
+  p.bass = arr16(null);
+  [0, 3, 6, 8, 10, 13, 15].forEach((s, i) => {
+    const base = bassNoteAt(s);
+    p.bass[s] = i % 3 === 1 ? base + 7 : base;
+  });
+
+  p.stab = arr16(null);
+  [0, 6, 10, 14].forEach((s) => {
+    p.stab[s] = chordAt(progAt(s), 48, false);
+  });
+  return p;
+}
+
 // ----------------------------------------------------------------------------
 // Generación de la idea (las "reglas" del techno + estilo)
 // ----------------------------------------------------------------------------
@@ -1285,6 +1369,7 @@ function generate() {
   const cand = shuffle([3, 7, 10, 11, 14]);
   const count = clamp(sp.stab - 1 + Math.round(e), 0, cand.length);
   cand.slice(0, count).forEach((s) => { if (p.stab[s] == null) p.stab[s] = chordAt(progAt(s), 48, seventh); });
+  if (sid === "afro") applyAfroGroove(p);
 
   pattern = p;
   syncTramo();
@@ -1384,6 +1469,19 @@ function tightenForHardGroove(p) {
   return p;
 }
 
+function tightenForAfro(p) {
+  applyAfroGroove(p);
+  p.mods.kick[15] = { p: 0.52, r: 1 };
+  p.mods.chat[6] = { p: 0.78, r: 2 };
+  p.mods.chat[14] = { p: 0.82, r: 2 };
+  return p;
+}
+
+function tightenForPreset(p, preset) {
+  if (preset === "afro") return tightenForAfro(p);
+  return tightenForHardGroove(p);
+}
+
 function makeBreakPattern(src) {
   const out = keepOnly(src, ["chat", "ohat", "stab"]);
   [0, 4, 8, 12].forEach((s) => {
@@ -1393,15 +1491,18 @@ function makeBreakPattern(src) {
   return out;
 }
 
-function createProArrangement() {
+function createProArrangement(opts = {}) {
+  const wasPlaying = window.Tone && Tone.Transport && Tone.Transport.state === "started";
+  const resumeAfter = opts.resume || wasPlaying;
+  if (wasPlaying) stop();
   const preset = $("preset") && $("preset").value ? $("preset").value : "hardgroove";
   if ($("preset")) $("preset").value = preset;
   applyGenrePreset(preset);
   applyProMacros(false);
   generate();
 
-  const dropA = tightenForHardGroove(deepCopy(pattern));
-  const dropB = tightenForHardGroove(mutate(dropA));
+  const dropA = tightenForPreset(deepCopy(pattern), preset);
+  const dropB = tightenForPreset(mutate(dropA), preset);
   const intro = keepOnly(dropA, ["kick", "chat", "ohat"]);
   [1, 5, 9, 13].forEach((s) => (intro.chat[s] = false));
   const build = keepOnly(dropA, ["kick", "chat", "ohat", "bass"]);
@@ -1430,7 +1531,8 @@ function createProArrangement() {
   renderProDesk();
   resync();
   markDirty();
-  setStatus("Track pro listo: <b>Intro · Build · Drop · Break · Drop 2 · Outro</b>. Pulsa <b>Play</b> o exporta MIDI/Stems.");
+  setStatus(`Track pro <b>${preset}</b> listo: Intro · Build · Drop · Break · Drop 2 · Outro.`);
+  if (resumeAfter) setTimeout(() => play(), 80);
 }
 
 function createHardTechnoTrack() {
@@ -1749,22 +1851,27 @@ function triggerStep(v, p, s, time, inc = () => true) {
 // Crea la secuencia. La fuente se lee DINÁMICAMENTE en cada paso, así que editar,
 // cambiar de tramo o de modo se oye al instante sin reiniciar.
 function buildSequence() {
-  if (seq) { seq.dispose(); seq = null; }
+  clearSequence();
   const songMode = mode === "song";
   if (songMode && !built) built = buildSong();
-  const len = (songMode ? built.song : pattern).kick.length;
+  const initialSrc = (songMode ? built.song : pattern);
+  const len = Math.max(1, initialSrc.kick.length);
   const fxMap = {};
   if (songMode && built) built.fx.forEach((e) => (fxMap[e.step] = e.type));
   const barSec = (60 / bpm()) * 4;
+  let step = 0;
 
-  seq = new Tone.Sequence((time, g) => {
+  seq = Tone.Transport.scheduleRepeat((time) => {
     const src = (mode === "song") ? (built ? built.song : pattern) : pattern;
+    const total = Math.max(1, src.kick.length || len);
+    const g = step % total;
     playbackStep = g;
     if (g < src.kick.length) triggerStep(live, src, g, time);
     if (fxMap[g] === "riser") live.riser(time, barSec);
     if (fxMap[g] === "downlifter") live.downlifter(time, barSec);
     if (fxMap[g] === "impact") live.impact(time);
-  }, [...Array(len).keys()], "16n").start(0);
+    step = (g + 1) % total;
+  }, "16n", 0);
 }
 
 // Rehace la secuencia en vivo si cambia su longitud (añadir/borrar tramo, modo)
@@ -1772,6 +1879,9 @@ function resync() { if (Tone.Transport.state === "started") buildSequence(); }
 
 async function play() {
   await Tone.start();
+  if (Tone.context && Tone.context.resume && Tone.context.state !== "running") await Tone.context.resume();
+  Tone.Transport.stop();
+  Tone.Transport.position = 0;
   Tone.Transport.bpm.value = bpm();
   Tone.Transport.swing = swingAmt();
   Tone.Transport.swingSubdivision = "16n";
@@ -1779,7 +1889,8 @@ async function play() {
   buildSequence();
   playbackStep = 0;
   if (live.vocalPlayer && !live._vocalSynced) { live.vocalPlayer.sync().start(0); live._vocalSynced = true; }
-  Tone.Transport.start();
+  Tone.Transport.start("+0.03");
+  startPlaybackWatchdog();
   $("playBtn").classList.add("playing");
   $("playBtn").textContent = "⏸ Stop";
   setStatus(mode === "song" ? "Reproduciendo el track completo 🔊" : "Reproduciendo el bucle 🔊");
@@ -1787,7 +1898,8 @@ async function play() {
 
 function stop() {
   Tone.Transport.stop();
-  if (seq) { seq.dispose(); seq = null; }
+  stopPlaybackWatchdog();
+  clearSequence();
   playbackStep = -1;
   $("playBtn").classList.remove("playing");
   $("playBtn").textContent = "▶ Play";
