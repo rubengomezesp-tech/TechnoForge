@@ -96,6 +96,7 @@ let sampleTarget = null;      // pista destino del próximo archivo cargado
 let editMode = "notes";       // "notes" | "prob" | "ratchet" — qué edita el clic en celda
 let selectedChannel = "kick"; // canal cuyo rack de FX se edita en el panel
 let pianoTarget = "bass";     // "bass" | "stab" — qué pista edita el piano roll
+let selectedSessionTrack = "kick"; // clip/pista mostrada en Clip View
 let vocal = { name: null, url: null, bars: 4, vol: 0, mute: false }; // pista de vocal/loop
 let vocalBuffer = null;       // Tone.ToneAudioBuffer de la vocal (en memoria)
 const SAMPLEABLE = ["kick", "clap", "chat", "ohat"]; // pistas de batería (one-shots)
@@ -2437,72 +2438,213 @@ function encodeWav(audioBuffer) {
 // ----------------------------------------------------------------------------
 // Interfaz
 // ----------------------------------------------------------------------------
+function patternHasTrack(p, t) {
+  const data = p && p[t.id];
+  return Array.isArray(data) && data.some((v) => t.type === "drum" ? !!v : v != null);
+}
+
+function clipDensity(p, t) {
+  const data = p && p[t.id];
+  if (!Array.isArray(data)) return 0;
+  return data.filter((v) => t.type === "drum" ? !!v : v != null).length;
+}
+
+function clipMeta(p, t) {
+  const hits = clipDensity(p, t);
+  if (!hits) return "empty";
+  if (t.id === "bass") {
+    const notes = p.bass.filter((n) => n != null);
+    return notes.length ? `${hits} notes · ${noteName(notes[0])}` : `${hits} notes`;
+  }
+  if (t.id === "stab") return `${hits} chords`;
+  return `${hits} hits`;
+}
+
+function selectSessionClip(sceneIdx, trackId) {
+  if (sceneIdx < 0 || sceneIdx >= patterns.length) return;
+  current = sceneIdx;
+  pattern = patterns[current];
+  selectedSessionTrack = trackId || selectedSessionTrack;
+  selectedChannel = selectedSessionTrack;
+  built = null;
+  refreshSong();
+  renderGrid();
+  renderMixer();
+  markDirty();
+  const t = TRACKS.find((x) => x.id === selectedSessionTrack);
+  setStatus(`Clip seleccionado: <b>${t ? t.name : selectedSessionTrack}</b> · Escena ${current + 1}.`);
+}
+
+function renderSessionTrackMixer(t) {
+  const m = mixOf(t.id);
+  const wrap = document.createElement("div");
+  wrap.className = "session-mix" + (selectedChannel === t.id ? " selected" : "");
+  wrap.onclick = () => { selectedChannel = t.id; selectedSessionTrack = t.id; renderGrid(); renderMixer(); };
+
+  const btns = document.createElement("div");
+  btns.className = "session-mix-btns";
+  const solo = document.createElement("button");
+  solo.type = "button";
+  solo.textContent = "S";
+  solo.className = m.solo ? "active" : "";
+  solo.onclick = (e) => { e.stopPropagation(); toggleSolo(t.id); };
+  const mute = document.createElement("button");
+  mute.type = "button";
+  mute.textContent = "M";
+  mute.className = m.mute ? "active" : "";
+  mute.onclick = (e) => { e.stopPropagation(); toggleMute(t.id); };
+  btns.append(solo, mute);
+
+  const meter = document.createElement("div");
+  meter.className = "session-meter";
+  meter.appendChild(Object.assign(document.createElement("span"), { id: "session-meter-" + t.id }));
+  const vol = document.createElement("input");
+  vol.type = "range";
+  vol.min = "-36";
+  vol.max = "6";
+  vol.step = "1";
+  vol.value = m.vol;
+  vol.oninput = (e) => { e.stopPropagation(); setVol(t.id, parseFloat(vol.value)); };
+  wrap.append(btns, meter, vol);
+  return wrap;
+}
+
 function renderGrid() {
   const grid = $("grid");
+  if (!grid) return;
   grid.innerHTML = "";
-  for (const t of TRACKS) {
-    const row = document.createElement("div");
-    row.className = "track";
 
+  const session = document.createElement("div");
+  session.className = "session-view";
+
+  const corner = document.createElement("div");
+  corner.className = "session-corner";
+  corner.textContent = "Scenes";
+  session.appendChild(corner);
+
+  TRACKS.forEach((t, i) => {
     const head = document.createElement("div");
-    head.className = "track-head";
-    head.innerHTML = `<span class="track-id" title="${t.name} — ${t.role}"><span class="name">${t.name}</span><span class="role">${t.role}</span></span>`;
-    const r = document.createElement("button");
-    r.className = "mini"; r.textContent = "🎲"; r.title = "Regenerar esta pista";
-    r.onclick = () => regenTrack(t.id);
-    const iso = document.createElement("button");
-    iso.className = "mini"; iso.textContent = "🎧"; iso.title = "Mantén pulsado para escuchar SOLO esta pista (aislar capa)";
-    iso.onpointerdown = (e) => { e.preventDefault(); isolateStart(t.id); };
-    iso.onpointerup = isolateEnd; iso.onpointerleave = isolateEnd; iso.onpointercancel = isolateEnd;
-    head.append(r, iso);
+    head.className = "session-track-head" + (selectedSessionTrack === t.id ? " selected" : "");
+    head.style.setProperty("--track-color", `var(--track-${t.id}, var(--accent))`);
+    head.onclick = () => { selectedSessionTrack = t.id; selectedChannel = t.id; renderGrid(); renderMixer(); };
+    const name = document.createElement("b"); name.textContent = `${i + 1} ${t.name}`;
+    const role = document.createElement("span"); role.textContent = t.role;
+    head.append(name, role);
+    session.appendChild(head);
+  });
 
-    // Sampler: cargar/quitar un audio real (solo pistas de batería)
-    if (SAMPLEABLE.includes(t.id)) {
-      const samp = document.createElement("button");
-      const loaded = samples[t.id];
-      samp.className = "mini sample-btn" + (loaded ? " loaded" : "");
-      samp.textContent = loaded ? "🎵" : "＋🎵";
-      samp.title = loaded ? `Sample: ${loaded.name} (clic para cambiar)` : "Cargar un sample (.wav/.mp3) — reemplaza la síntesis";
-      samp.onclick = () => { sampleTarget = t.id; $("sampleInput").click(); };
-      head.append(samp);
-      const lib = document.createElement("button");
-      lib.className = "mini"; lib.textContent = "📚"; lib.title = "Cargar un sonido del kit de fábrica (clic para cambiar)";
-      lib.onclick = () => loadFactory(t.id);
-      head.append(lib);
-      if (loaded) {
-        const x = document.createElement("button");
-        x.className = "mini"; x.textContent = "✕"; x.title = "Quitar sample (volver a síntesis)";
-        x.onclick = () => clearSample(t.id);
-        head.append(x);
-      }
-    }
+  ["A Reverb", "B Delay", "Main"].forEach((name) => {
+    const ret = document.createElement("div");
+    ret.className = "session-track-head return";
+    ret.append(Object.assign(document.createElement("b"), { textContent: name }), Object.assign(document.createElement("span"), { textContent: "return" }));
+    session.appendChild(ret);
+  });
 
-    const steps = document.createElement("div");
-    steps.className = "steps";
-    for (let s = 0; s < STEPS; s++) {
-      const cell = document.createElement("div");
-      const on = t.type === "drum" ? pattern[t.id][s] : pattern[t.id][s] != null;
-      const mod = on && pattern.mods[t.id] ? pattern.mods[t.id][s] : null;
-      cell.className = "step" + (s % 4 === 0 ? " beat" : "") + (on ? " on" : "")
-                       + (on && t.type === "pitch" ? " note" : "");
-      cell.dataset.track = t.id; cell.dataset.step = s;
-      // Indicadores de probabilidad (opacidad + %) y ratchet (nº de golpes)
-      if (mod && mod.p != null && mod.p < 1) {
-        cell.style.opacity = (0.4 + mod.p * 0.6).toFixed(2);
-        const b = document.createElement("span"); b.className = "cell-prob"; b.textContent = Math.round(mod.p * 100); cell.appendChild(b);
-      }
-      if (mod && mod.r > 1) {
-        const b = document.createElement("span"); b.className = "cell-ratchet"; b.textContent = "×" + mod.r; cell.appendChild(b);
-      }
-      cell.onclick = () => toggleCell(t, s);
-      steps.appendChild(cell);
-    }
-    row.append(head, steps);
-    grid.appendChild(row);
-  }
+  patterns.forEach((p, sceneIdx) => {
+    const scene = document.createElement("button");
+    scene.type = "button";
+    scene.className = "session-scene" + (sceneIdx === current ? " active" : "");
+    scene.onclick = () => selectSessionClip(sceneIdx, selectedSessionTrack);
+    scene.innerHTML = `<b>${sceneIdx + 1}</b><span>${tramoFxOf(sceneIdx) === "none" ? "Scene" : tramoFxOf(sceneIdx)}</span>`;
+    session.appendChild(scene);
+
+    TRACKS.forEach((t) => {
+      const active = patternHasTrack(p, t);
+      const slot = document.createElement("button");
+      slot.type = "button";
+      slot.className = "clip-slot" + (active ? " filled" : "") + (sceneIdx === current && selectedSessionTrack === t.id ? " selected" : "");
+      slot.style.setProperty("--track-color", `var(--track-${t.id}, var(--accent))`);
+      slot.onclick = () => selectSessionClip(sceneIdx, t.id);
+      const launch = document.createElement("span"); launch.className = "clip-launch"; launch.textContent = active ? "▶" : "";
+      const label = document.createElement("b"); label.textContent = active ? `${sceneIdx + 1}-${t.name}` : "";
+      const meta = document.createElement("span"); meta.textContent = active ? clipMeta(p, t) : "";
+      slot.append(launch, label, meta);
+      session.appendChild(slot);
+    });
+
+    ["", "", ""].forEach((_, i) => {
+      const ret = document.createElement("div");
+      ret.className = "clip-slot return" + (i === 2 ? " main" : "");
+      ret.textContent = i === 2 ? String(sceneIdx + 1) : "";
+      session.appendChild(ret);
+    });
+  });
+
+  const stop = document.createElement("div");
+  stop.className = "session-stop-label";
+  stop.textContent = "Mix";
+  session.appendChild(stop);
+  TRACKS.forEach((t) => session.appendChild(renderSessionTrackMixer(t)));
+  ["Post", "Post", "Cue"].forEach((label) => {
+    const cell = document.createElement("div");
+    cell.className = "session-return-mix";
+    cell.textContent = label;
+    session.appendChild(cell);
+  });
+
+  grid.appendChild(session);
   renderMixer();
   renderTramos();
   renderPiano();
+  renderClipDetail();
+}
+
+function renderClipDetail() {
+  const el = $("clipDetail"); if (!el) return;
+  const t = TRACKS.find((x) => x.id === selectedSessionTrack) || TRACKS[0];
+  selectedSessionTrack = t.id;
+  el.innerHTML = "";
+
+  const header = document.createElement("div");
+  header.className = "clip-detail-head";
+  const title = document.createElement("div");
+  title.className = "clip-title";
+  title.innerHTML = `<b>${current + 1}-${escapeHTML(t.name)}</b><span>${tramoBarsOf(current)} bars · ${clipMeta(pattern, t)}</span>`;
+  const tabs = document.createElement("div");
+  tabs.className = "clip-tabs";
+  [["notes", "Notes"], ["prob", "Prob"], ["ratchet", "Ratchet"]].forEach(([id, label]) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = editMode === id ? "active" : "";
+    b.textContent = label;
+    b.onclick = () => setEditMode(id);
+    tabs.appendChild(b);
+  });
+  header.append(title, tabs);
+
+  const props = document.createElement("div");
+  props.className = "clip-props";
+  [["Start", "1.1.1"], ["Length", `${tramoBarsOf(current)}.0.0`], ["Grid", "1/16"], ["Scale", $("scale") ? $("scale").selectedOptions[0].textContent : scaleId()]].forEach(([k, v]) => {
+    const box = document.createElement("div");
+    box.append(Object.assign(document.createElement("span"), { textContent: k }), Object.assign(document.createElement("b"), { textContent: v }));
+    props.appendChild(box);
+  });
+
+  const lane = document.createElement("div");
+  lane.className = "clip-note-lane";
+  for (let s = 0; s < STEPS; s++) {
+    const cell = document.createElement("button");
+    cell.type = "button";
+    const on = t.type === "drum" ? pattern[t.id][s] : pattern[t.id][s] != null;
+    const mod = on && pattern.mods[t.id] ? pattern.mods[t.id][s] : null;
+    cell.className = "clip-step" + (s % 4 === 0 ? " beat" : "") + (on ? " on" : "") + (t.type === "pitch" && on ? " note" : "");
+    cell.dataset.track = t.id; cell.dataset.step = s;
+    cell.style.setProperty("--track-color", `var(--track-${t.id}, var(--accent))`);
+    const pos = document.createElement("span"); pos.className = "clip-step-pos"; pos.textContent = String(s + 1);
+    const val = document.createElement("b");
+    val.textContent = on
+      ? t.id === "bass" ? noteName(pattern.bass[s])
+        : t.id === "stab" ? "Chord"
+        : "Hit"
+      : "";
+    cell.append(pos, val);
+    if (mod && Number.isFinite(mod.p) && mod.p < 1) cell.appendChild(Object.assign(document.createElement("em"), { textContent: `${Math.round(mod.p * 100)}%` }));
+    if (mod && mod.r > 1) cell.appendChild(Object.assign(document.createElement("i"), { textContent: `x${mod.r}` }));
+    cell.onclick = () => toggleCell(t, s);
+    lane.appendChild(cell);
+  }
+
+  el.append(header, props, lane);
 }
 
 // --- Mezclador (zona propia, con channel strips estilo estudio) ---
@@ -2561,7 +2703,12 @@ function channelStrip(id, name, m, solo) {
   return strip;
 }
 
-function selectChannel(id) { selectedChannel = id; renderMixer(); }
+function selectChannel(id) {
+  selectedChannel = id;
+  selectedSessionTrack = id;
+  renderMixer();
+  renderGrid();
+}
 
 // Panel de efectos del canal seleccionado: sliders precisos con su valor
 function renderChannelFx() {
@@ -2658,7 +2805,11 @@ function meterLoop(now = 0) {
   lastMeterDraw = now;
   if (!live || !live.meters) return;
   const playing = window.Tone && Tone.Transport && Tone.Transport.state === "started";
-  for (const t of TRACKS) setMeterBar("meter-" + t.id, playing ? live.meters[t.id].getValue() : -Infinity);
+  for (const t of TRACKS) {
+    const value = playing ? live.meters[t.id].getValue() : -Infinity;
+    setMeterBar("meter-" + t.id, value);
+    setMeterBar("session-meter-" + t.id, value);
+  }
   setMeterBar("meter-master", playing && live.masterMeter ? live.masterMeter.getValue() : -Infinity);
 }
 
@@ -2933,7 +3084,9 @@ function highlightSection(g) {
 function highlight(s) {
   if (currentStep === s) return;
   document.querySelectorAll(".step.playhead").forEach((el) => el.classList.remove("playhead"));
+  document.querySelectorAll(".clip-step.playhead").forEach((el) => el.classList.remove("playhead"));
   if (s >= 0) document.querySelectorAll(`.step[data-step="${s}"]`).forEach((el) => el.classList.add("playhead"));
+  if (s >= 0) document.querySelectorAll(`.clip-step[data-step="${s}"]`).forEach((el) => el.classList.add("playhead"));
   currentStep = s;
 }
 
