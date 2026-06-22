@@ -84,6 +84,8 @@ let proBrief = "";            // briefing/reference textual local (sin backend)
 let referenceDna = null;       // análisis local de referencia: energía/pico/duración
 let aiHistory = [];            // firmas de generaciones IA recientes para evitar repetición
 let aiRequestActive = false;   // evita generar varias pistas IA en paralelo
+let studioBrowserQuery = "";
+let studioBrowserFilter = "all";
 let projectName = "Mi track";
 let samples = {};             // sampler: { trackId: {name, url(dataURL)} } persistente
 let sampleBuffers = {};       // { trackId: Tone.ToneAudioBuffer } en memoria (decodificado)
@@ -102,6 +104,31 @@ const AI_TIMEOUT_MS = 28000;
 const escapeHTML = (v) => String(v == null ? "" : v).replace(/[&<>"']/g, (ch) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;"
 })[ch]);
+
+const STUDIO_BROWSER_CATS = [
+  ["all", "Todo"],
+  ["preset", "Presets"],
+  ["generator", "Generadores"],
+  ["transform", "Transformar"],
+  ["output", "Salida"]
+];
+
+const STUDIO_BROWSER_ITEMS = [
+  { id: "preset-hardgroove", cat: "preset", name: "Hard Groove 145", meta: "drive / hats / rumble", tags: "adrian mills hardgroove groove 145 club", action: "preset:hardgroove" },
+  { id: "preset-afro", cat: "preset", name: "Afro Techno 126", meta: "percusión / síncopa", tags: "afro tribal organic percusion bajo elegante", action: "preset:afro" },
+  { id: "preset-schranz", cat: "preset", name: "Schranz 155", meta: "presión / velocidad", tags: "schranz hard techno brutal 155", action: "preset:schranz" },
+  { id: "preset-acid", cat: "preset", name: "Acid Warehouse", meta: "303 / movimiento", tags: "acid warehouse 303 rave", action: "preset:acid" },
+  { id: "preset-industrial", cat: "preset", name: "Industrial Raw", meta: "metal / distorsión", tags: "industrial raw distorsion oscuro", action: "preset:industrial" },
+  { id: "gen-ai", cat: "generator", name: "AI Producer", meta: "brief / no repetición", tags: "ia openai productor brief track pro", action: "ai" },
+  { id: "gen-seed", cat: "generator", name: "Rhythm Seed", meta: "patrón nuevo", tags: "ritmo idea groove drums midi generator", action: "generate" },
+  { id: "gen-section", cat: "generator", name: "Section Seed", meta: "tramo nuevo", tags: "tramo seccion clip session", action: "new-section" },
+  { id: "tr-mut", cat: "transform", name: "Mutar Tramo", meta: "variación musical", tags: "mutar variacion transform drop break", action: "mutate" },
+  { id: "tr-arrange", cat: "transform", name: "Arreglo Club", meta: "intro / drop / outro", tags: "arrangement arreglo intro build drop", action: "arrange" },
+  { id: "tr-reference", cat: "transform", name: "Analizar Referencia", meta: "WAV / MP3", tags: "referencia audio wav mp3 analisis", action: "reference" },
+  { id: "out-master", cat: "output", name: "Auto Master", meta: "LUFS / pico", tags: "master loudness lufs normalize", action: "master" },
+  { id: "out-midi", cat: "output", name: "Export MIDI", meta: "DAW externo", tags: "midi ableton daw export", action: "midi" },
+  { id: "out-wav", cat: "output", name: "Export WAV", meta: "mezcla final", tags: "wav audio render export", action: "wav" }
+];
 
 // Claves de nota que se aplanan al montar el track (no incluir 'mods' aquí)
 const NOTE_KEYS = ["kick", "clap", "chat", "ohat", "bass", "stab"];
@@ -445,7 +472,7 @@ function applyGenrePreset(name) {
   mix = defaultMix();
   if (g.fx) for (const id of Object.keys(g.fx)) if (mix[id]) Object.assign(mix[id], g.fx[id]);
   invalidateVoices();
-  renderInstruments(); renderModulation(); renderMixer(); renderProDesk(); renderAutomation();
+  renderInstruments(); renderModulation(); renderMixer(); renderProDesk(); renderStudioBrowser(); renderAutomation();
   markDirty();
   setStatus(`Preset <b>${name}</b> aplicado. Pulsa <b>🎲 Generar idea</b> para un patrón del estilo, o <b>Play</b>.`);
 }
@@ -536,7 +563,7 @@ function loadReferenceFile(file) {
       proMacros.dirt = Math.max(proMacros.dirt, 0.35 + peakScore * 0.38);
       proMacros.space = Math.min(proMacros.space, 0.48);
       applyProMacros(false);
-      renderProDesk(); renderAutomation(); markDirty();
+      renderProDesk(); renderStudioBrowser(); renderAutomation(); markDirty();
       setStatus(`Referencia analizada: <b>${referenceDna.name}</b> · ${referenceDna.duration}s · ${referenceDna.rmsDb} dB RMS · pico ${referenceDna.peakDb} dBFS.`);
     }, () => setStatus("No pude decodificar esa referencia (prueba WAV/MP3)."));
   };
@@ -566,7 +593,7 @@ function applyBrief(makeTrack = false) {
 
   applyProMacros(!makeTrack);
   if (makeTrack) createProArrangement({ resume: wasPlaying });
-  renderProDesk(); renderAutomation(); markDirty();
+  renderProDesk(); renderStudioBrowser(); renderAutomation(); markDirty();
   if (!makeTrack && wasPlaying) setTimeout(() => play(), 80);
 }
 
@@ -683,6 +710,7 @@ function applyAIPlan(plan, opts = {}) {
   renderModulation();
   renderMixer();
   renderProDesk();
+  renderStudioBrowser();
   markDirty();
   setStatus(`IA real: <b>${escapeHTML(plan.title)}</b>. ${escapeHTML(plan.intent)}`);
   if (resumeAfter) setTimeout(() => play(), 100);
@@ -738,6 +766,7 @@ async function createWithAI() {
   proBrief = input ? input.value : proBrief;
   aiRequestActive = true;
   renderProDesk();
+  renderStudioBrowser();
   setStatus("IA produciendo un track nuevo…");
   const payload = {
     brief: proBrief || "hard groove techno track original",
@@ -756,7 +785,130 @@ async function createWithAI() {
   } finally {
     aiRequestActive = false;
     renderProDesk();
+    renderStudioBrowser();
   }
+}
+
+function runStudioBrowserAction(action) {
+  const [kind, value] = String(action || "").split(":");
+  if (kind === "preset" && GENRE_PRESETS[value]) {
+    if ($("preset")) $("preset").value = value;
+    applyGenrePreset(value);
+    generate();
+  } else if (action === "ai") {
+    createWithAI();
+  } else if (action === "generate") {
+    generate();
+  } else if (action === "new-section") {
+    newIdeaTramo();
+  } else if (action === "mutate") {
+    mutateTramo();
+  } else if (action === "arrange") {
+    createProArrangement();
+  } else if (action === "reference") {
+    const input = $("studioRefInput");
+    if (input) input.click();
+  } else if (action === "master") {
+    normalizeLoudness();
+  } else if (action === "midi") {
+    exportMidiFile();
+  } else if (action === "wav") {
+    exportWav();
+  }
+  renderStudioBrowser();
+}
+
+function renderStudioBrowser() {
+  const el = $("studioBrowser"); if (!el) return;
+  el.innerHTML = "";
+
+  const selectedPreset = $("preset") ? $("preset").value : "";
+  const query = studioBrowserQuery.trim().toLowerCase();
+  const filtered = STUDIO_BROWSER_ITEMS.filter((item) => {
+    const inCat = studioBrowserFilter === "all" || item.cat === studioBrowserFilter;
+    const haystack = `${item.name} ${item.meta} ${item.tags}`.toLowerCase();
+    return inCat && (!query || haystack.includes(query));
+  });
+
+  const library = document.createElement("div"); library.className = "browser-library";
+  const head = document.createElement("div"); head.className = "browser-head";
+  head.append(Object.assign(document.createElement("span"), { textContent: "Browser" }));
+  head.append(Object.assign(document.createElement("b"), { textContent: `${filtered.length}` }));
+  const search = document.createElement("input");
+  search.type = "search";
+  search.value = studioBrowserQuery;
+  search.placeholder = "Buscar";
+  search.autocomplete = "off";
+  search.oninput = () => { studioBrowserQuery = search.value; renderStudioBrowser(); };
+  const cats = document.createElement("div"); cats.className = "browser-cats";
+  STUDIO_BROWSER_CATS.forEach(([id, label]) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "browser-cat" + (studioBrowserFilter === id ? " active" : "");
+    b.textContent = label;
+    b.onclick = () => { studioBrowserFilter = id; renderStudioBrowser(); };
+    cats.appendChild(b);
+  });
+  const list = document.createElement("div"); list.className = "browser-list";
+  filtered.forEach((item) => {
+    const row = document.createElement("button");
+    row.type = "button";
+    const presetActive = item.action === `preset:${selectedPreset}`;
+    row.className = "browser-row" + (presetActive ? " active" : "");
+    row.title = item.tags;
+    const name = document.createElement("span"); name.className = "browser-name"; name.textContent = item.name;
+    const meta = document.createElement("span"); meta.className = "browser-meta"; meta.textContent = item.meta;
+    row.append(name, meta);
+    row.onclick = () => runStudioBrowserAction(item.action);
+    list.appendChild(row);
+  });
+  if (!filtered.length) {
+    const empty = document.createElement("div");
+    empty.className = "browser-empty";
+    empty.textContent = "Sin resultados";
+    list.appendChild(empty);
+  }
+  const refInput = document.createElement("input");
+  refInput.id = "studioRefInput";
+  refInput.type = "file";
+  refInput.accept = "audio/*";
+  refInput.hidden = true;
+  refInput.onchange = (e) => { if (e.target.files[0]) loadReferenceFile(e.target.files[0]); e.target.value = ""; };
+  library.append(head, search, cats, list, refInput);
+
+  const rack = document.createElement("div"); rack.className = "browser-rack";
+  const title = document.createElement("div"); title.className = "browser-head";
+  title.append(Object.assign(document.createElement("span"), { textContent: "Track" }));
+  title.append(Object.assign(document.createElement("b"), { textContent: mode === "song" ? "Song" : "Loop" }));
+  const stats = document.createElement("div"); stats.className = "browser-stats";
+  [
+    ["BPM", bpm()],
+    ["Estilo", styleId()],
+    ["Tramos", patterns.length],
+    ["IA", aiHistory.length ? `${aiHistory.length} firmas` : "lista"]
+  ].forEach(([k, v]) => {
+    const stat = document.createElement("div"); stat.className = "browser-stat";
+    stat.append(Object.assign(document.createElement("span"), { textContent: k }), Object.assign(document.createElement("b"), { textContent: String(v) }));
+    stats.appendChild(stat);
+  });
+  const quick = document.createElement("div"); quick.className = "browser-quick";
+  [
+    ["Crear con IA", "ai", aiRequestActive],
+    ["Arreglo Club", "arrange", false],
+    ["Mutar", "mutate", false],
+    ["Auto Master", "master", false]
+  ].forEach(([label, action, disabled]) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = action === "ai" && aiRequestActive ? "IA..." : label;
+    b.disabled = !!disabled;
+    if (action === "ai") b.className = "accent";
+    b.onclick = () => runStudioBrowserAction(action);
+    quick.appendChild(b);
+  });
+  rack.append(title, stats, quick);
+
+  el.append(library, rack);
 }
 
 function renderProDesk() {
@@ -1033,7 +1185,7 @@ function loadProject(p) {
   if ($("projName")) $("projName").value = projectName;
   built = null; resetLive(); // reconstruir voces con la mezcla nueva
   if (window.Tone && Tone.Transport) Tone.Transport.bpm.value = bpm();
-  refreshSong(); renderGrid(); renderTimeline(); renderAutomation(); renderInstruments(); renderModulation(); renderVocal(); renderProDesk();
+  refreshSong(); renderGrid(); renderTimeline(); renderAutomation(); renderInstruments(); renderModulation(); renderVocal(); renderProDesk(); renderStudioBrowser();
   return true;
 }
 
@@ -1081,7 +1233,7 @@ function newProject() {
   referenceDna = null;
   if ($("rumble")) { $("rumble").value = 0; $("rumbleOut").textContent = "0"; }
   renderModulation();
-  renderProDesk(); renderAutomation();
+  renderProDesk(); renderStudioBrowser(); renderAutomation();
   synth = defaultSynths(); renderInstruments();
   vocal = { name: null, url: null, bars: 4, vol: 0, mute: false }; vocalBuffer = null; renderVocal();
   if ($("projName")) $("projName").value = projectName;
@@ -1730,6 +1882,7 @@ function createProArrangement(opts = {}) {
   renderModulation();
   renderMixer();
   renderProDesk();
+  renderStudioBrowser();
   resync();
   markDirty();
   setStatus(`Track pro <b>${preset}</b> listo: Intro · Build · Drop · Break · Drop 2 · Outro.`);
@@ -2815,6 +2968,7 @@ function init() {
   drawSpectrum(); // analizador de espectro
   liveUiLoop(); // contador/playhead desacoplados del callback musical
   renderProDesk();
+  renderStudioBrowser();
   renderAutomation();
   renderInstruments();
   renderModulation();
