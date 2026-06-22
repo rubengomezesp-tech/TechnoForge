@@ -202,7 +202,7 @@ function applyFx(id) {
     const m = mixOf(id), f = live.fx[id];
     if (f.eq) { f.eq.low.value = m.low || 0; f.eq.mid.value = m.mid || 0; f.eq.high.value = m.high || 0; }
     if (f.comp) f.comp.threshold.value = compThreshold(m.comp || 0);
-    if (f.crush) f.crush.bits.value = crushBits(m.crush || 0);
+    if (f.crush && f.crush.bits) f.crush.bits.value = crushBits(m.crush || 0);
     if (f.widener) f.widener.width.value = m.width != null ? m.width : 0.5;
     f.drive.curve = makeDriveCurve(m.drive || 0);
     f.sendRev.gain.value = m.rev || 0;
@@ -1987,13 +1987,19 @@ function buildVoices(opts = {}) {
     const comp = own(new Tone.Compressor({ threshold: compThreshold(m.comp || 0), ratio: 4, attack: 0.01, release: 0.12 }));
     const drive = own(new Tone.WaveShaper(makeDriveCurve(m.drive || 0)));
     drive.oversample = liveMode ? "none" : "2x"; // en vivo prioriza fluidez; export usa oversampling
-    const crush = liveMode ? null : own(new Tone.BitCrusher(crushBits(m.crush || 0)));
+    // El BitCrusher de Tone 14.7.77 usa ScriptProcessorNode (lento en render
+    // offline: hace el export ~tiempo real). En vivo ya se omite; en offline lo
+    // creamos SOLO si el canal de verdad usa crush. crush==0 → 16 bits =
+    // transparente, así que omitirlo da audio idéntico y export mucho más rápido.
+    const crush = (!liveMode && (m.crush || 0) > 0) ? own(new Tone.BitCrusher(crushBits(m.crush))) : null;
     const widener = liveMode ? null : own(new Tone.StereoWidener(m.width != null ? m.width : 0.5));
     const scGain = own(new Tone.Gain(1)); // sidechain: baja por cada golpe de kick
-    // cadena de canal pro: EQ → comp → saturación → bitcrush → width → sidechain → máster
+    // cadena de canal pro: EQ → comp → saturación → [bitcrush] → [width] → sidechain → máster
     c.connect(eq); eq.connect(comp); comp.connect(drive);
-    if (crush && widener) { drive.connect(crush); crush.connect(widener); widener.connect(scGain); }
-    else drive.connect(scGain);
+    let node = drive;
+    if (crush)   { node.connect(crush);   node = crush; }
+    if (widener) { node.connect(widener); node = widener; }
+    node.connect(scGain);
     scGain.connect(master);
     const sendRev = own(new Tone.Gain(m.rev || 0));   scGain.connect(sendRev);   sendRev.connect(reverb);
     const sendDly = own(new Tone.Gain(m.delay || 0)); scGain.connect(sendDly);   sendDly.connect(delay);
