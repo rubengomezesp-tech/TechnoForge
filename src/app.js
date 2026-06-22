@@ -41,15 +41,18 @@ const STYLE_PARAMS = {
 // Motor de Armonía Emocional: cada emoción fija una escala y una PROGRESIÓN
 // (grados de la escala, un acorde por tiempo) + sesgos. Aquí vive la traducción
 // "sentimiento → armonía" (ver docs/VISION.md). prog = grados 0-índice del acorde.
+// La emoción es la interfaz (ver VISION): además de armonía (escala+progresión),
+// baja a tempo (bpm), timbre (bright = corte del filtro del stab, en Hz) y energía.
+// desc = la intención en una frase (se muestra al elegirla).
 const EMOTIONS = {
-  melancolia: { scale: "minor",    prog: [0, 5, 3, 4], seventh: true,  energy: 40, label: "Melancolía" }, // i–VI–iv–v
-  esperanza:  { scale: "ionian",   prog: [0, 4, 5, 3], seventh: false, energy: 55, label: "Esperanza"  }, // I–V–vi–IV
-  epica:      { scale: "minor",    prog: [0, 5, 6, 4], seventh: false, energy: 80, label: "Épica"      }, // i–VI–VII–v
-  oscuridad:  { scale: "phrygian", prog: [0, 1, 0, 5], seventh: false, energy: 55, label: "Oscuridad"  }, // i–bII–i–VI
-  nostalgia:  { scale: "dorian",   prog: [0, 3, 5, 4], seventh: true,  energy: 45, label: "Nostalgia"  }, // i–IV–VI–v
-  grandeza:   { scale: "lydian",   prog: [0, 4, 5, 1], seventh: true,  energy: 72, label: "Grandeza"   },
-  tension:    { scale: "phrygian", prog: [0, 4, 1, 4], seventh: false, energy: 88, label: "Tensión"    },
-  liberacion: { scale: "ionian",   prog: [0, 3, 4, 0], seventh: false, energy: 70, label: "Liberación" }, // I–IV–V–I
+  melancolia: { scale: "minor",    prog: [0, 5, 3, 4], seventh: true,  energy: 40, bpm: 122, bright: 1600, label: "Melancolía", desc: "Menor, lento y oscuro: nostalgia introspectiva." }, // i–VI–iv–v
+  esperanza:  { scale: "ionian",   prog: [0, 4, 5, 3], seventh: false, energy: 55, bpm: 126, bright: 3600, label: "Esperanza",  desc: "Mayor luminoso: optimismo que crece." }, // I–V–vi–IV
+  epica:      { scale: "minor",    prog: [0, 5, 6, 4], seventh: false, energy: 80, bpm: 132, bright: 4200, label: "Épica",      desc: "Tensión heroica: empuje hacia el clímax." }, // i–VI–VII–v
+  oscuridad:  { scale: "phrygian", prog: [0, 1, 0, 5], seventh: false, energy: 55, bpm: 130, bright: 1200, label: "Oscuridad",  desc: "Frigia muy oscura: opresión y misterio." }, // i–bII–i–VI
+  nostalgia:  { scale: "dorian",   prog: [0, 3, 5, 4], seventh: true,  energy: 45, bpm: 124, bright: 2000, label: "Nostalgia",  desc: "Dórica cálida: melancolía con groove." }, // i–IV–VI–v
+  grandeza:   { scale: "lydian",   prog: [0, 4, 5, 1], seventh: true,  energy: 72, bpm: 128, bright: 4800, label: "Grandeza",   desc: "Lidia asombrosa: amplitud y elevación." },
+  tension:    { scale: "phrygian", prog: [0, 4, 1, 4], seventh: false, energy: 88, bpm: 138, bright: 2600, label: "Tensión",    desc: "Frigia rápida y dura: inquietud que aprieta." },
+  liberacion: { scale: "ionian",   prog: [0, 3, 4, 0], seventh: false, energy: 70, bpm: 130, bright: 4000, label: "Liberación", desc: "Mayor que resuelve: euforia y soltura." }, // I–IV–V–I
 };
 
 // Estructura del track (modo Track). keep = pistas activas; variant = qué
@@ -2971,13 +2974,20 @@ function init() {
   $("sampleInput").onchange = (e) => { if (e.target.files[0] && sampleTarget) loadSampleFile(e.target.files[0], sampleTarget); e.target.value = ""; };
   $("vocalInput").onchange = (e) => { if (e.target.files[0]) loadVocalFile(e.target.files[0]); e.target.value = ""; };
 
-  // La emoción fija escala + energía sugeridas y regenera (Motor de Armonía Emocional)
+  // La emoción es la interfaz: baja a armonía (escala+progresión), energía,
+  // tempo y timbre (brillo del stab). Motor de Armonía Emocional → todo el sonido.
   $("emotion").onchange = () => {
     const em = currentEmotion();
     $("scale").value = em.scale;
     $("energy").value = em.energy;
     $("energyOut").textContent = em.energy;
+    if (em.bpm) {
+      $("bpm").value = em.bpm; $("bpmOut").textContent = em.bpm;
+      if (typeof Tone !== "undefined") Tone.Transport.bpm.value = em.bpm;
+    }
+    if (em.bright) { synth.stab.cutoff = em.bright; applySynth("stab"); renderInstruments(); }
     generate();
+    if (em.desc) setStatus(`<b>${em.label}</b> — ${em.desc}`);
   };
   // Cambiar tonalidad / escala / estilo regenera la idea para aplicarlos
   ["root", "scale", "style"].forEach((id) => ($(id).onchange = generate));
