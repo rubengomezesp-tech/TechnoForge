@@ -713,7 +713,8 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px 
   transition: height 60ms linear;
 }
 .strip-vol {
-  -webkit-appearance: slider-vertical; appearance: slider-vertical;
+  /* Fader vertical por método estándar (writing-mode), no el deprecado
+     'appearance: slider-vertical' que avisaba en consola y se retirará. */
   writing-mode: vertical-lr; direction: rtl; width: 22px; height: 132px;
 }
 .strip-db { font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
