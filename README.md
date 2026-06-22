@@ -73,6 +73,13 @@ dependencias del proyecto):
 > El MIDI es lo más potente: te da la **idea musical** lista para que la
 > conviertas en un temazo en tu DAW con tus propios plugins.
 
+### IA real
+
+El botón **Crear con IA** llama a un endpoint seguro en Vercel (`/api/ai-producer`)
+que usa `OPENAI_API_KEY` como variable de entorno. La key no se expone en el
+navegador. La IA devuelve controles, macros, arreglo y patrones editables; la app
+guarda firmas recientes para pedir variaciones nuevas y evitar repetir estructuras.
+
 ---
 
 ## 🧠 Qué hace por dentro (las "reglas" del techno)

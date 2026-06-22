@@ -82,6 +82,7 @@ let synth = defaultSynths();  // sintes editables (bajo y acordes): onda/filtro/
 let proMacros = defaultProMacros(); // macros de producción: tensión/groove/dirt/space
 let proBrief = "";            // briefing/reference textual local (sin backend)
 let referenceDna = null;       // análisis local de referencia: energía/pico/duración
+let aiHistory = [];            // firmas de generaciones IA recientes para evitar repetición
 let projectName = "Mi track";
 let samples = {};             // sampler: { trackId: {name, url(dataURL)} } persistente
 let sampleBuffers = {};       // { trackId: Tone.ToneAudioBuffer } en memoria (decodificado)
@@ -564,6 +565,152 @@ function applyBrief(makeTrack = false) {
   if (!makeTrack && wasPlaying) setTimeout(() => play(), 80);
 }
 
+function patternFingerprint(p) {
+  if (!p) return "empty";
+  const bits = NOTE_KEYS.map((k) => {
+    const arr = p[k] || [];
+    return `${k}:${arr.map((v, i) => v == null || v === false ? "" : i).filter((v) => v !== "").join(".")}`;
+  }).join("|");
+  let h = 2166136261;
+  for (let i = 0; i < bits.length; i++) {
+    h ^= bits.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(36);
+}
+
+function projectFingerprint() {
+  return patterns.map((p, i) => `${i}:${tramoBarsOf(i)}:${tramoFxOf(i)}:${patternFingerprint(p)}`).join("/");
+}
+
+function rememberAISignature(sig) {
+  const clean = String(sig || projectFingerprint()).slice(0, 96);
+  aiHistory = [clean, ...aiHistory.filter((x) => x !== clean)].slice(0, 12);
+}
+
+function compactProjectForAI() {
+  return {
+    mode,
+    bpm: bpm(),
+    root: rootPc(),
+    preset: $("preset") ? $("preset").value : "",
+    style: styleId(),
+    emotion: $("emotion") ? $("emotion").value : "",
+    scale: scaleId(),
+    macros: proMacros,
+    currentFingerprint: projectFingerprint(),
+    recentSignatures: aiHistory.slice(0, 8)
+  };
+}
+
+function uniqueSteps(list) {
+  return Array.from(new Set((Array.isArray(list) ? list : [])
+    .map((v) => Math.max(0, Math.min(15, Math.round(+v))))
+    .filter((v) => Number.isFinite(v)))).sort((a, b) => a - b);
+}
+
+function patternFromAIHits(hits) {
+  const p = blankPattern();
+  for (const id of ["kick", "clap", "chat", "ohat"]) {
+    uniqueSteps(hits && hits[id]).forEach((s) => { p[id][s] = true; });
+  }
+  if (hits && Array.isArray(hits.bass)) hits.bass.forEach((n) => {
+    const s = Math.max(0, Math.min(15, Math.round(+n.step)));
+    const midi = Math.max(24, Math.min(72, Math.round(+n.midi)));
+    if (Number.isFinite(s) && Number.isFinite(midi)) p.bass[s] = midi;
+  });
+  if (hits && Array.isArray(hits.stab)) hits.stab.forEach((ch) => {
+    const s = Math.max(0, Math.min(15, Math.round(+ch.step)));
+    const notes = Array.isArray(ch.notes)
+      ? ch.notes.map((n) => Math.max(36, Math.min(84, Math.round(+n)))).filter(Number.isFinite).slice(0, 4)
+      : [];
+    if (Number.isFinite(s) && notes.length >= 2) p.stab[s] = notes;
+  });
+  if (hits && Array.isArray(hits.mods)) hits.mods.forEach((m) => {
+    if (!NOTE_KEYS.includes(m.track)) return;
+    const s = Math.max(0, Math.min(15, Math.round(+m.step)));
+    p.mods[m.track][s] = { p: clamp(+m.p || 1, 0.05, 1), r: Math.max(1, Math.min(4, Math.round(+m.r || 1))) };
+  });
+  return normalizePattern(p);
+}
+
+function applyAIPlan(plan, opts = {}) {
+  if (!plan || !plan.controls || !Array.isArray(plan.sections)) throw new Error("Respuesta IA incompleta");
+  const wasPlaying = window.Tone && Tone.Transport && Tone.Transport.state === "started";
+  const resumeAfter = opts.resume || wasPlaying;
+  if (wasPlaying) stop();
+
+  const c = plan.controls;
+  if ($("preset")) $("preset").value = c.preset || "hardgroove";
+  applyGenrePreset($("preset") ? $("preset").value : "hardgroove");
+  if ($("style")) $("style").value = c.style || styleId();
+  if ($("emotion")) $("emotion").value = c.emotion || "tension";
+  if ($("scale")) $("scale").value = c.scale || currentEmotion().scale;
+  setControlValue("bpm", c.bpm || 145);
+  setControlValue("root", c.root != null ? c.root : rootPc());
+  setControlValue("energy", c.energy != null ? c.energy : 80);
+  setControlValue("swing", c.swing != null ? c.swing : 10);
+  setControlValue("rumble", c.rumble != null ? c.rumble : 50);
+  setControlValue("humanize", c.humanize != null ? c.humanize : 10);
+  if (window.Tone) Tone.Transport.bpm.value = bpm();
+
+  proMacros = normalizeProMacros(plan.macros);
+  applyProMacros(false);
+
+  const sections = plan.sections.slice(0, 7);
+  patterns = sections.map((s) => patternFromAIHits(s.hits || {}));
+  tramoBars = sections.map((s) => Math.max(2, Math.min(16, Math.round(+s.bars || 4))));
+  tramoFx = sections.map((s) => ["none", "riser", "impact", "drop"].includes(s.transition) ? s.transition : "none");
+  tramoVocal = sections.map((s) => s.vocal !== false);
+  barsPerTramo = tramoBars[0] || 4;
+  current = Math.min(2, patterns.length - 1);
+  pattern = patterns[current];
+  mode = "song";
+  built = buildSong();
+  $("modeBtn").textContent = "🎚️ Track";
+  rememberAISignature(`${plan.signature}:${projectFingerprint()}`);
+  resetLive();
+  refreshSong();
+  renderGrid();
+  renderTimeline();
+  renderAutomation();
+  renderInstruments();
+  renderModulation();
+  renderMixer();
+  renderProDesk();
+  markDirty();
+  setStatus(`IA real: <b>${plan.title}</b>. ${plan.intent}`);
+  if (resumeAfter) setTimeout(() => play(), 100);
+}
+
+async function createWithAI() {
+  const wasPlaying = window.Tone && Tone.Transport && Tone.Transport.state === "started";
+  if (wasPlaying) stop();
+  const input = $("proBrief");
+  proBrief = input ? input.value : proBrief;
+  setStatus("IA produciendo un track nuevo…");
+  const payload = {
+    brief: proBrief || "hard groove techno track original",
+    nonce: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    avoid: [projectFingerprint(), ...aiHistory].slice(0, 12),
+    current: compactProjectForAI()
+  };
+  try {
+    const res = await fetch("/api/ai-producer", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (!res.ok || !data.plan) throw new Error(data.message || data.error || "IA no disponible");
+    applyAIPlan(data.plan, { resume: wasPlaying });
+  } catch (err) {
+    setStatus(`IA no disponible ahora (${err.message}). Uso motor local para no romper la sesión.`);
+    applyBrief(true);
+    if (wasPlaying) setTimeout(() => play(), 100);
+  }
+}
+
 function renderProDesk() {
   const el = $("prodesk"); if (!el) return;
   el.innerHTML = "";
@@ -576,9 +723,11 @@ function renderProDesk() {
   ta.value = proBrief;
   ta.oninput = () => { proBrief = ta.value; markDirty(); };
   const actions = document.createElement("div"); actions.className = "pro-actions";
+  const ai = document.createElement("button"); ai.className = "accent"; ai.textContent = "Crear con IA"; ai.title = "Usa OpenAI en backend para generar un track nuevo y no repetido";
+  ai.onclick = () => createWithAI();
   const apply = document.createElement("button"); apply.textContent = "Aplicar brief"; apply.title = "Traduce el briefing a preset, emoción, macros y patrón";
   apply.onclick = () => applyBrief(false);
-  const trackBtn = document.createElement("button"); trackBtn.className = "accent"; trackBtn.textContent = "Crear track pro"; trackBtn.title = "Crea un arreglo completo desde el briefing o preset actual";
+  const trackBtn = document.createElement("button"); trackBtn.textContent = "Crear local"; trackBtn.title = "Crea un arreglo local si la IA no está disponible";
   trackBtn.onclick = () => applyBrief(true);
   const arrange = document.createElement("button"); arrange.textContent = "Arreglo pro"; arrange.title = "Convierte el patrón actual en un track con intro/build/drop/break/drop/outro";
   arrange.onclick = () => createProArrangement();
@@ -588,7 +737,7 @@ function renderProDesk() {
   const refInput = document.createElement("input"); refInput.type = "file"; refInput.accept = "audio/*"; refInput.hidden = true;
   ref.onclick = () => refInput.click();
   refInput.onchange = (e) => { if (e.target.files[0]) loadReferenceFile(e.target.files[0]); e.target.value = ""; };
-  actions.append(apply, trackBtn, arrange, master, ref, refInput);
+  actions.append(ai, apply, trackBtn, arrange, master, ref, refInput);
   brief.append(briefTitle, ta, actions);
   if (referenceDna) {
     const refMeta = document.createElement("div"); refMeta.className = "auto-meta";
@@ -759,6 +908,7 @@ function getProject() {
     proMacros,
     proBrief,
     referenceDna,
+    aiHistory,
     samples,
     vocal,
   };
@@ -807,6 +957,7 @@ function loadProject(p) {
   proMacros = normalizeProMacros(p.proMacros);
   proBrief = p.proBrief || "";
   referenceDna = p.referenceDna || null;
+  aiHistory = Array.isArray(p.aiHistory) ? p.aiHistory.slice(0, 12).map(String) : [];
   // Sampler: re-decodifica los samples guardados en buffers de audio
   samples = {}; sampleBuffers = {};
   if (p.samples && window.Tone) {
