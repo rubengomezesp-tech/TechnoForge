@@ -583,6 +583,16 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px 
 .pr-cell.beat { background: color-mix(in srgb, var(--surface-3) 70%, var(--surface-4)); }
 .pr-cell:hover { border-color: var(--ink-2); }
 .pr-cell.on { background: var(--accent-2); border-color: var(--accent-2); }
+.pr-cell.stab.on { background: var(--accent); border-color: var(--accent); }
+
+.pr-head { display: flex; align-items: center; gap: var(--s-4); padding: 0 0 var(--s-3) 0; flex-wrap: wrap; }
+.pr-target { display: inline-flex; gap: 4px; }
+.pr-target .seg {
+  padding: 6px 12px; font-size: 12px; background: var(--surface-3);
+  border: 1px solid var(--line); border-radius: 8px; color: var(--ink-2); cursor: pointer;
+}
+.pr-target .seg.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 650; }
+.pr-hint { font-size: 11px; color: var(--muted); }
 
 /* ----------------------------------------------------- Pista de Vocal ------ */
 .vocal { display: flex; align-items: center; gap: var(--s-3); padding: var(--s-2) var(--s-5) 0; flex-wrap: wrap; }

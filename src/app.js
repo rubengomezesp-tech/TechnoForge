@@ -92,6 +92,7 @@ let sampleBuffers = {};       // { trackId: Tone.ToneAudioBuffer } en memoria (d
 let sampleTarget = null;      // pista destino del próximo archivo cargado
 let editMode = "notes";       // "notes" | "prob" | "ratchet" — qué edita el clic en celda
 let selectedChannel = "kick"; // canal cuyo rack de FX se edita en el panel
+let pianoTarget = "bass";     // "bass" | "stab" — qué pista edita el piano roll
 let vocal = { name: null, url: null, bars: 4, vol: 0, mute: false }; // pista de vocal/loop
 let vocalBuffer = null;       // Tone.ToneAudioBuffer de la vocal (en memoria)
 const SAMPLEABLE = ["kick", "clap", "chat", "ohat"]; // pistas de batería (one-shots)
@@ -2787,11 +2788,60 @@ function setEditMode(m) {
 // --- Piano roll del Bajo: melodías libres (cualquier nota por paso) ---
 const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 function noteName(m) { return NOTE_NAMES[((m % 12) + 12) % 12] + (Math.floor(m / 12) - 1); }
+
+// ¿suena la nota midi en el paso s para el destino actual del piano roll?
+function pianoCellOn(s, midi) {
+  if (pianoTarget === "bass") return pattern.bass[s] === midi;
+  const c = pattern.stab[s];
+  return Array.isArray(c) && c.includes(midi);
+}
+
+// Alterna la nota midi en el paso s. Bajo = monofónico (una nota por paso).
+// Stab = polifónico: añade/quita la nota del acorde, así sirve para leads
+// (una nota por paso) y para acordes (varias). Si el acorde queda vacío → null.
+function pianoToggle(s, midi) {
+  if (pianoTarget === "bass") {
+    pattern.bass[s] = (pattern.bass[s] === midi) ? null : midi;
+  } else {
+    const c = Array.isArray(pattern.stab[s]) ? pattern.stab[s].slice() : [];
+    const i = c.indexOf(midi);
+    if (i >= 0) c.splice(i, 1); else c.push(midi);
+    c.sort((a, b) => a - b);
+    pattern.stab[s] = c.length ? c : null;
+  }
+  syncTramo(); built = null; refreshSong(); renderPiano(); renderGrid(); markDirty();
+}
+
 function renderPiano() {
   const el = $("piano"); if (!el || el.style.display === "none") return; // solo si la zona está abierta
   el.innerHTML = "";
+
+  // Cabecera: selector de destino (Bajo / Stab) + ayuda
+  const head = document.createElement("div");
+  head.className = "pr-head";
+  const seg = document.createElement("div"); seg.className = "pr-target";
+  [["bass", "Bajo"], ["stab", "Stab / Lead"]].forEach(([id, label]) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "seg" + (pianoTarget === id ? " active" : "");
+    b.textContent = label;
+    b.title = id === "bass"
+      ? "Edita la línea de bajo (una nota por paso)"
+      : "Edita stabs/leads: cada nota suma al acorde de ese paso (lead = una nota, acorde = varias)";
+    b.onclick = () => { pianoTarget = id; renderPiano(); };
+    seg.appendChild(b);
+  });
+  const hint = document.createElement("span");
+  hint.className = "pr-hint";
+  hint.textContent = pianoTarget === "bass"
+    ? "Bajo · una nota por paso"
+    : "Stab/Lead · varias notas = acorde, una nota = lead";
+  head.append(seg, hint);
+  el.appendChild(head);
+
+  const grid = document.createElement("div"); grid.className = "pr-grid";
   const sc = SCALES[scaleId()];
-  const root = 24 + rootPc();          // ~C1
+  const root = (pianoTarget === "bass" ? 24 : 48) + rootPc(); // Bajo ~C1, Stab ~C3
   const lo = root, hi = root + 19;     // ~1.5 octavas
   for (let midi = hi; midi >= lo; midi--) {
     const inScale = sc.includes((((midi - root) % 12) + 12) % 12);
@@ -2800,16 +2850,15 @@ function renderPiano() {
     const steps = document.createElement("div"); steps.className = "pr-steps";
     for (let s = 0; s < STEPS; s++) {
       const cell = document.createElement("div");
-      const on = pattern.bass[s] === midi;
-      cell.className = "pr-cell" + (s % 4 === 0 ? " beat" : "") + (on ? " on" : "");
-      cell.onclick = () => {
-        pattern.bass[s] = (pattern.bass[s] === midi) ? null : midi;
-        syncTramo(); built = null; refreshSong(); renderPiano(); renderGrid(); markDirty();
-      };
+      const on = pianoCellOn(s, midi);
+      cell.className = "pr-cell" + (s % 4 === 0 ? " beat" : "") + (on ? " on" : "")
+        + (pianoTarget === "stab" ? " stab" : "");
+      cell.onclick = () => pianoToggle(s, midi);
       steps.appendChild(cell);
     }
-    row.append(key, steps); el.appendChild(row);
+    row.append(key, steps); grid.appendChild(row);
   }
+  el.appendChild(grid);
 }
 
 function renderTimeline() {
