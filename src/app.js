@@ -83,6 +83,7 @@ let proMacros = defaultProMacros(); // macros de producción: tensión/groove/di
 let proBrief = "";            // briefing/reference textual local (sin backend)
 let referenceDna = null;       // análisis local de referencia: energía/pico/duración
 let aiHistory = [];            // firmas de generaciones IA recientes para evitar repetición
+let aiRequestActive = false;   // evita generar varias pistas IA en paralelo
 let projectName = "Mi track";
 let samples = {};             // sampler: { trackId: {name, url(dataURL)} } persistente
 let sampleBuffers = {};       // { trackId: Tone.ToneAudioBuffer } en memoria (decodificado)
@@ -97,6 +98,10 @@ const $ = (id) => document.getElementById(id);
 const rnd = Math.random;
 const arr16 = (v) => Array.from({ length: STEPS }, () => v);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const AI_TIMEOUT_MS = 28000;
+const escapeHTML = (v) => String(v == null ? "" : v).replace(/[&<>"']/g, (ch) => ({
+  "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;"
+})[ch]);
 
 // Claves de nota que se aplanan al montar el track (no incluir 'mods' aquí)
 const NOTE_KEYS = ["kick", "clap", "chat", "ohat", "bass", "stab"];
@@ -679,15 +684,60 @@ function applyAIPlan(plan, opts = {}) {
   renderMixer();
   renderProDesk();
   markDirty();
-  setStatus(`IA real: <b>${plan.title}</b>. ${plan.intent}`);
+  setStatus(`IA real: <b>${escapeHTML(plan.title)}</b>. ${escapeHTML(plan.intent)}`);
   if (resumeAfter) setTimeout(() => play(), 100);
 }
 
+function friendlyAIError(data, status) {
+  const code = String(data && data.error ? data.error : "");
+  const raw = String(data && (data.message || data.detail) ? (data.message || data.detail) : "");
+  const text = `${code} ${raw}`.toLowerCase();
+
+  if (code === "missing_openai_api_key") return "falta OPENAI_API_KEY en Vercel";
+  if (code === "openai_auth_failed") return "la clave de OpenAI no es válida o no tiene permisos";
+  if (code === "openai_timeout") return "OpenAI tardó demasiado en responder";
+  if (status === 404 || raw.trim().startsWith("<")) return "endpoint de IA no disponible en este entorno";
+  if (code === "openai_account_inactive" || /(account is not active|billing|quota|credit|crédit|inactive)/.test(text)) {
+    return "OpenAI no tiene billing o créditos activos en este proyecto";
+  }
+  if (code === "openai_rate_limited" || status === 429) return "OpenAI está limitando temporalmente las generaciones";
+  return raw || code || "IA no disponible";
+}
+
+async function requestAIPlan(payload) {
+  const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timeout = controller ? setTimeout(() => controller.abort(), AI_TIMEOUT_MS) : null;
+  try {
+    const res = await fetch("/api/ai-producer", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: controller ? controller.signal : undefined
+    });
+    const text = await res.text();
+    let data = {};
+    try { data = text ? JSON.parse(text) : {}; } catch (err) { data = { message: text.slice(0, 220) }; }
+    if (!res.ok || !data.plan) throw new Error(friendlyAIError(data, res.status));
+    return data.plan;
+  } catch (err) {
+    if (err && err.name === "AbortError") throw new Error("OpenAI tardó demasiado en responder");
+    throw err;
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
 async function createWithAI() {
+  if (aiRequestActive) {
+    setStatus("La IA ya está generando un track. Espera unos segundos…");
+    return;
+  }
   const wasPlaying = window.Tone && Tone.Transport && Tone.Transport.state === "started";
   if (wasPlaying) stop();
   const input = $("proBrief");
   proBrief = input ? input.value : proBrief;
+  aiRequestActive = true;
+  renderProDesk();
   setStatus("IA produciendo un track nuevo…");
   const payload = {
     brief: proBrief || "hard groove techno track original",
@@ -696,18 +746,15 @@ async function createWithAI() {
     current: compactProjectForAI()
   };
   try {
-    const res = await fetch("/api/ai-producer", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-    const data = await res.json();
-    if (!res.ok || !data.plan) throw new Error(data.message || data.error || "IA no disponible");
-    applyAIPlan(data.plan, { resume: wasPlaying });
+    const plan = await requestAIPlan(payload);
+    applyAIPlan(plan, { resume: wasPlaying });
   } catch (err) {
-    setStatus(`IA no disponible ahora (${err.message}). Uso motor local para no romper la sesión.`);
+    setStatus(`IA no disponible: <b>${escapeHTML(err.message)}</b>. He creado una versión local para no romper la sesión.`);
     applyBrief(true);
     if (wasPlaying) setTimeout(() => play(), 100);
+  } finally {
+    aiRequestActive = false;
+    renderProDesk();
   }
 }
 
@@ -717,13 +764,15 @@ function renderProDesk() {
 
   const brief = document.createElement("div"); brief.className = "pro-brief";
   const briefTitle = document.createElement("div"); briefTitle.className = "pro-title";
-  briefTitle.append(Object.assign(document.createElement("span"), { textContent: "Brief / referencia" }), Object.assign(document.createElement("span"), { className: "pro-badge", textContent: "local" }));
+  briefTitle.append(Object.assign(document.createElement("span"), { textContent: "Brief / referencia" }), Object.assign(document.createElement("span"), { className: "pro-badge", textContent: aiRequestActive ? "OpenAI..." : "OpenAI + local" }));
   const ta = document.createElement("textarea"); ta.id = "proBrief";
   ta.placeholder = "Ej: hard groove tipo Adrian Mills, 145 BPM, oscuro, rumble agresivo, drop seco y hats con swing";
   ta.value = proBrief;
   ta.oninput = () => { proBrief = ta.value; markDirty(); };
   const actions = document.createElement("div"); actions.className = "pro-actions";
-  const ai = document.createElement("button"); ai.className = "accent"; ai.textContent = "Crear con IA"; ai.title = "Usa OpenAI en backend para generar un track nuevo y no repetido";
+  const ai = document.createElement("button"); ai.className = "accent"; ai.textContent = aiRequestActive ? "IA trabajando..." : "Crear con IA"; ai.title = "Usa OpenAI en backend para generar un track nuevo y no repetido";
+  ai.disabled = aiRequestActive;
+  ai.setAttribute("aria-busy", aiRequestActive ? "true" : "false");
   ai.onclick = () => createWithAI();
   const apply = document.createElement("button"); apply.textContent = "Aplicar brief"; apply.title = "Traduce el briefing a preset, emoción, macros y patrón";
   apply.onclick = () => applyBrief(false);

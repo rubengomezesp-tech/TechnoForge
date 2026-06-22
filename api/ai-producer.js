@@ -1,5 +1,6 @@
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 const MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
+const OPENAI_TIMEOUT_MS = Number(process.env.OPENAI_TIMEOUT_MS || 25000);
 
 const STYLE = ["hardgroove", "schranz", "acid", "raw", "afro", "peaktime", "hypnotic", "melodic", "industrial"];
 const PRESET = ["hardgroove", "schranz", "acid", "raw", "afro", "hard", "melodic", "hypnotic", "industrial"];
@@ -173,6 +174,54 @@ function safeJson(content) {
   return JSON.parse(text);
 }
 
+function optionalJson(text) {
+  try { return text ? JSON.parse(text) : {}; } catch (err) { return {}; }
+}
+
+function publicOpenAIError(status, data) {
+  const provider = data && data.error ? data.error : {};
+  const detail = String(provider.message || data.message || "OpenAI request failed").slice(0, 260);
+  const providerCode = String(provider.code || provider.type || "").slice(0, 80);
+  const lower = `${detail} ${providerCode}`.toLowerCase();
+
+  if (status === 401 || status === 403) {
+    return {
+      error: "openai_auth_failed",
+      message: "OpenAI rechazó la clave configurada. Revisa OPENAI_API_KEY en Vercel.",
+      detail,
+      providerStatus: status,
+      providerCode
+    };
+  }
+
+  if (status === 429 && /(account is not active|billing|quota|credit|insufficient_quota|inactive)/.test(lower)) {
+    return {
+      error: "openai_account_inactive",
+      message: "OpenAI rechazó la generación porque la cuenta/proyecto no tiene billing o créditos activos.",
+      detail,
+      providerStatus: status,
+      providerCode
+    };
+  }
+
+  if (status === 429) {
+    return {
+      error: "openai_rate_limited",
+      message: "OpenAI está limitando temporalmente las generaciones. Inténtalo de nuevo en unos segundos.",
+      detail,
+      providerStatus: status,
+      providerCode
+    };
+  }
+
+  return {
+    error: "openai_error",
+    message: detail,
+    providerStatus: status,
+    providerCode
+  };
+}
+
 module.exports = async function handler(req, res) {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
@@ -186,36 +235,42 @@ module.exports = async function handler(req, res) {
 
   try {
     const input = await parseBody(req);
-    const response = await fetch(OPENAI_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        temperature: 0.95,
-        messages: [
-          { role: "system", content: systemPrompt() },
-          { role: "user", content: userPrompt(input) }
-        ],
-        response_format: {
-          type: "json_schema",
-          json_schema: {
-            name: "technoforge_ai_track",
-            strict: true,
-            schema
-          }
-        }
-      })
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), OPENAI_TIMEOUT_MS);
+    let response;
 
-    const data = await response.json();
-    if (!response.ok) {
-      res.status(response.status).json({
-        error: "openai_error",
-        message: data && data.error ? data.error.message : "OpenAI request failed"
+    try {
+      response = await fetch(OPENAI_URL, {
+        method: "POST",
+        signal: controller.signal,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`
+        },
+        body: JSON.stringify({
+          model: MODEL,
+          temperature: 0.95,
+          messages: [
+            { role: "system", content: systemPrompt() },
+            { role: "user", content: userPrompt(input) }
+          ],
+          response_format: {
+            type: "json_schema",
+            json_schema: {
+              name: "technoforge_ai_track",
+              strict: true,
+              schema
+            }
+          }
+        })
       });
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    const data = optionalJson(await response.text());
+    if (!response.ok) {
+      res.status(response.status).json(publicOpenAIError(response.status, data));
       return;
     }
 
@@ -225,6 +280,13 @@ module.exports = async function handler(req, res) {
     const plan = safeJson(content);
     res.status(200).json({ source: "openai", model: MODEL, plan });
   } catch (err) {
+    if (err && err.name === "AbortError") {
+      res.status(504).json({
+        error: "openai_timeout",
+        message: "OpenAI tardó demasiado en responder. La app puede seguir con el motor local."
+      });
+      return;
+    }
     res.status(500).json({ error: "ai_producer_failed", message: err.message || "Unknown error" });
   }
 };
